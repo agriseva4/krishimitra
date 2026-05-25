@@ -1,4 +1,5 @@
 import logging
+import traceback
 from typing import Optional
 from app.config import SUPABASE_URL, SUPABASE_KEY
 
@@ -19,7 +20,8 @@ def get_db():
         log.info("✅ Supabase connected!")
         return _db
     except Exception as e:
-        log.error(f"Supabase error: {e}")
+        log.error(f"Supabase full error: {repr(e)}")
+        traceback.print_exc()
         return None
 
 async def get_farmer(phone: str) -> Optional[dict]:
