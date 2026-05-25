@@ -6,7 +6,7 @@ from app.config import SUPABASE_URL, SUPABASE_KEY
 log = logging.getLogger(__name__)
 _db = None
 
-get_db():
+def get_db():
     global _db
     if _db: return _db
     if not SUPABASE_URL or not SUPABASE_KEY:
