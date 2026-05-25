@@ -11,7 +11,7 @@ def get_db():
         from supabase import create_client
 
         url = "https://sapxlhimveweyualkcxj.supabase.co"
-        key = "PASTE_FULL_SUPABASE_KEY_HERE"
+        key = "sb_secret_VjX1gt7FP8PqqEDiToQyAg_i9_ArbQ3"
 
         print("URL LEN:", len(url))
         print("KEY LEN:", len(key))
