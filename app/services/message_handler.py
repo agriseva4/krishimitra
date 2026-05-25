@@ -95,7 +95,7 @@ async def _text(text: str, farmer: dict) -> str:
     district = farmer.get("district", "Pune")
 
     # Help
-   if any(w in t for w in ["help","madad","मदत","मदद","start","menu","नमस्कार","namaskar"]):
+    if any(w in t for w in ["help","madad","मदत","मदद","start","menu","नमस्कार","namaskar"]):
         return HELP
 
     # Trend
