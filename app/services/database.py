@@ -7,22 +7,23 @@ log = logging.getLogger(__name__)
 _db = None
 
 def get_db():
-    global _db
-    if _db: return _db
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        log.error("❌ Supabase keys missing!")
-        return None
     try:
-        from supabase.client import Client, create_client
-        print("URL LEN:", len(SUPABASE_URL))
-        print("KEY LEN:", len(SUPABASE_KEY))
-        print("KEY START:", SUPABASE_KEY[:15])
-        print("KEY END:", SUPABASE_KEY[-15:])
-        _db = create_client(SUPABASE_URL, SUPABASE_KEY)
-        log.info("✅ Supabase connected!")
-        return _db
+        from supabase import create_client
+
+        url = "https://sapxlhimveweyualkcxj.supabase.co"
+        key = "PASTE_FULL_SUPABASE_KEY_HERE"
+
+        print("URL LEN:", len(url))
+        print("KEY LEN:", len(key))
+
+        db = create_client(url, key)
+
+        print("CONNECTED SUCCESSFULLY")
+
+        return db
+
     except Exception as e:
-        log.error(f"Supabase full error: {repr(e)}")
+        print("ERROR:", repr(e))
         traceback.print_exc()
         return None
 
