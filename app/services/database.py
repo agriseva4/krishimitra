@@ -13,6 +13,8 @@ def get_db():
         return None
     try:
         from supabase import create_client
+        print("SUPABASE_URL =", SUPABASE_URL)
+        print("SUPABASE_KEY =", SUPABASE_KEY[:30] if SUPABASE_KEY else "EMPTY")
         _db = create_client(SUPABASE_URL, SUPABASE_KEY)
         log.info("✅ Supabase connected!")
         return _db
