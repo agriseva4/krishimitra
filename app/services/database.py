@@ -12,7 +12,7 @@ def get_db():
         log.error("❌ Supabase keys missing!")
         return None
     try:
-        from supabase import create_client
+        from supabase.client import Client, create_client
         print("SUPABASE_URL =", SUPABASE_URL)
         print("SUPABASE_KEY =", SUPABASE_KEY[:30] if SUPABASE_KEY else "EMPTY")
         _db = create_client(SUPABASE_URL, SUPABASE_KEY)
