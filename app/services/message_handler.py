@@ -7,44 +7,35 @@ from app.services.whatsapp import get_media_url, download_media
 
 log = logging.getLogger(__name__)
 
-FREE_NUMBERS = [
-    # "919XXXXXXXXX",  # Tumcha number uncomment kara
-]
+FREE_NUMBERS = []
 
-HELP = """🌾 *KrishiMitra — Tumcha AI Shetkari Mitra*
-_Pune | Marathi | Hindi | English_
+WELCOME = """🙏 *नमस्कार!*
+शेतीसंबंधित काहीही माहिती हवी असेल तर इथे विचारा 🌱
 
-*Kay vicharata yete:*
+✅ बाजारभाव
+✅ हवामान
+✅ पीक सल्ला
+✅ रोग उपाय
 
-1️⃣ *Pik Rog* 🔬
-   Pikachi photo pathva — AI diagnosis milel
+तुमचा प्रश्न पाठवा 😊
+_— KrishiMitra 🌾_"""
 
-2️⃣ *Khate / Fawara* 🧪
-   "कांद्यासाठी खत सांग"
-   "टोमॅटोला किती पाणी द्यावे"
+HELP = """🌾 *KrishiMitra — तुमचा AI शेतकरी मित्र*
 
-3️⃣ *Live Mandi Bhav* 📊
-   "आजचे मंडी भाव"
-   "कांदा भाव" / "टोमॅटो भाव"
+*काय विचारता येते:*
 
-4️⃣ *Price Trend* 📈
-   "कांदा trend" / "टोमॅटो trend"
-
-5️⃣ *Havaman* 🌦️
-   "आजचे हवामान सांग"
-
-6️⃣ *Sarkar Yojana* 🏛️
-   "PM किसान सांग" / "पीक विमा माहिती"
-
-7️⃣ *Koni pn Prashn* 💬
-   Marathi / Hindi / English madhe
+1️⃣ *पीक रोग* 🔬 — पिकाचा फोटो पाठवा
+2️⃣ *खते / फवारणी* 🧪 — \"कांद्यासाठी खत सांग\"
+3️⃣ *मंडी भाव* 📊 — \"आजचे मंडी भाव\"
+4️⃣ *हवामान* 🌦️ — \"आजचे हवामान सांग\"
+5️⃣ *सरकारी योजना* 🏛️ — \"PM किसान सांग\"
+6️⃣ *कोणताही प्रश्न* 💬 — मराठीत विचारा
 
 ━━━━━━━━━━━━
-📞 *Kisan Helpline:* 1800-180-1551 (Free)
-_KrishiMitra — Shetkaryasathi, Shetkaryani_ 🙏"""
+📞 *किसान हेल्पलाइन:* 1800-180-1551 (मोफत)
+_KrishiMitra — शेतकऱ्यांसाठी_ 🙏"""
 
 async def handle(phone: str, message: dict, msg_type: str) -> str:
-    # Free numbers — always approved
     if phone in FREE_NUMBERS:
         farmer = {"phone": phone, "is_approved": True, "is_free": True,
                   "crops": ["onion", "tomato"], "city": "Pune",
@@ -55,14 +46,14 @@ async def handle(phone: str, message: dict, msg_type: str) -> str:
 
     if not farmer:
         await create_farmer(phone)
-        return ("🌾 *KrishiMitra madhe Swagat!*\n\n"
-                "Tumchi nondani milali! ✅\n"
-                "Admin 24 tasaat approve karil.\n\n"
-                "Approve zhalyavar message yeil. 🙏\n\n"
-                "_KrishiMitra — Tumcha Vishwasniya Shetkari Mitra_")
+        return ("🌾 *KrishiMitra मध्ये स्वागत!*\n\n"
+                "तुमची नोंदणी मिळाली! ✅\n"
+                "Admin २४ तासात approve करील.\n\n"
+                "Approve झाल्यावर message येईल. 🙏\n\n"
+                "_KrishiMitra — तुमचा विश्वासनीय शेतकरी मित्र_")
 
     if not farmer.get("is_approved"):
-        return "⏳ Tumchi nondani approve hone baaki ahe.\nAdmin lवkarach karil. Dhanyavad! 🙏"
+        return "⏳ तुमची नोंदणी approve होणे बाकी आहे.\nAdmin लवकरच करील. धन्यवाद! 🙏"
 
     if farmer.get("is_blocked"):
         return ""
@@ -73,7 +64,7 @@ async def _route(phone, msg, mtype, farmer):
     try:
         if mtype == "text":
             text = msg.get("text", {}).get("body", "").strip()
-            if not text: return HELP
+            if not text: return WELCOME
             resp = await _text(text, farmer)
             await log_conv(phone, text, resp, "text")
             return resp
@@ -84,18 +75,26 @@ async def _route(phone, msg, mtype, farmer):
             await log_conv(phone, f"[IMAGE]{caption}", resp, "image")
             return resp
         elif mtype == "audio":
-            return "🎤 Voice support lavkarach!\nAthasathi text madhe pathva. 🙏"
-        return HELP
+            return "🎤 व्हॉइस सपोर्ट लवकरच येणार!\nसध्या टेक्स्ट मध्ये पाठवा. 🙏"
+        return WELCOME
     except Exception as e:
         log.error(f"Route {phone}: {e}")
-        return "❌ Thodi adchan aali. Parat prayatna kara. 🙏"
+        return "❌ *थोडी अडचण आली.*\nकृपया पुन्हा प्रयत्न करा. 🙏"
 
 async def _text(text: str, farmer: dict) -> str:
     t = text.lower().strip()
     district = farmer.get("district", "Pune")
 
-    # Help
-    if any(w in t for w in ["help","madad","मदत","मदद","start","menu","नमस्कार","namaskar"]):
+    # Hi/Hello → Welcome
+    if any(w in t for w in ["hi","hello","hey","helo","hii","नमस्कार","namaskar","hy","hye"]):
+        return WELCOME
+
+    # Short replies → AI la pathav
+    if t in ["okay","ok","हो","yes","हां","thanks","thank you","👍","theek","theek ahe","accha","ठीक","बरं","बरे"]:
+        return await farming_answer(text, farmer)
+
+    # Help menu
+    if any(w in t for w in ["help","madad","मदत","मदद","start","menu"]):
         return HELP
 
     # Trend
@@ -125,17 +124,17 @@ async def _text(text: str, farmer: dict) -> str:
     if any(w in t for w in ["yojana","योजना","scheme","sarkar","vima","विमा","kisan","किसान","subsidy","loan","कर्ज","insurance"]):
         return await scheme_info(text)
 
-    # AI Q&A — everything else
+    # AI Q&A
     return await farming_answer(text, farmer)
 
 async def _image(img_id, caption, farmer):
-    if not img_id: return "❌ Photo milali nahi. Parat pathva."
+    if not img_id: return "❌ *फोटो मिळाला नाही.*\nकृपया पुन्हा पाठवा. 📸"
     try:
         url = await get_media_url(img_id)
-        if not url: return "❌ Photo download karta ali nahi. Parat pathva."
+        if not url: return "❌ *फोटो डाउनलोड करता आला नाही.*\nकृपया पुन्हा पाठवा. 📸"
         data = await download_media(url)
-        if not data: return "❌ Photo empty ahe. Saaf photo pathva."
+        if not data: return "❌ *फोटो रिकामा आहे.*\nस्वच्छ फोटो पाठवा. 📸"
         return await disease_detect(data, caption, farmer)
     except Exception as e:
         log.error(f"Image {e}")
-        return "❌ Photo process karta ali nahi.\nSaaf, prakashit photo pathva. 🙏"
+        return "❌ *फोटो तपासता आला नाही.*\nस्वच्छ, प्रकाशात काढलेला फोटो पाठवा. 🙏"
