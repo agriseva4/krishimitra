@@ -52,6 +52,31 @@ FORMAT:
 - Max 400 words
 - Practical, direct steps"""
 
+async def voice_to_text(audio_bytes: bytes) -> str:
+    """Voice message → Marathi text convert"""
+    m = get_model()
+    if not m: return ""
+    if not audio_bytes: return ""
+    try:
+        import base64
+        b64 = base64.b64encode(audio_bytes).decode()
+        prompt = """He WhatsApp voice message ahe. 
+Yatil bolne EXACTLY transcribe kar — Marathi, Hindi, ya English madhe jo bolala ahe.
+Fakt transcription dya, kahi explanation nako.
+Jar nit aiku yet nahi tar 'UNCLEAR' lihia."""
+        r = m.generate_content([
+            prompt,
+            {"mime_type": "audio/ogg", "data": b64}
+        ])
+        text = r.text.strip()
+        if "UNCLEAR" in text or len(text) < 2:
+            return ""
+        log.info(f"Voice transcribed: {text[:50]}")
+        return text
+    except Exception as e:
+        log.error(f"voice_to_text: {e}")
+        return ""
+
 async def farming_answer(question: str, farmer: dict) -> str:
     m = get_model()
     if not m: return "❌ *AI सेवा सध्या उपलब्ध नाही.*\nकृपया थोड्या वेळाने पुन्हा प्रयत्न करा. 🙏"
@@ -110,7 +135,7 @@ Photo paahun MARATHI madhe exact sangaa:
 
 Shetkari {crops} gheto. {f'Note: {caption}' if caption else ''}
 
-MAHATVACHE: Pakke nahi tar 'तज्ञाला फोटो दाखवा' sang — andaaj lau naka!"""
+MAHATVACHE: Pakke nahi tar 'तज्ञाला फोटो दाखवा' sang!"""
         r = m.generate_content([prompt, {"mime_type": "image/jpeg", "data": b64}])
         d = r.text.strip()
         low = any(w in d.lower() for w in ["low", "pakke nahi", "expert la", "unclear", "cannot"])
