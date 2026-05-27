@@ -1,6 +1,7 @@
 import logging
 from app.services.database import get_farmer, create_farmer, log_conv
 from app.services.ai_service import farming_answer, disease_detect, scheme_info, voice_to_text
+from app.services.weather import get_weather
 from app.services.whatsapp import get_media_url, download_media
 
 log = logging.getLogger(__name__)
@@ -74,11 +75,15 @@ async def _text(text: str, farmer: dict) -> str:
     if any(w in t for w in ["hi","hello","hey","helo","hii","नमस्कार","namaskar","hy","hye"]):
         return WELCOME
 
-    # Help menu
-    if any(w in t for w in ["help","madad","मदत","start","menu"]):
-        return WELCOME
+    # Weather → Direct OpenWeather API (short & real)
+    if any(w in t for w in ["weather","havaman","हवामान","पाऊस","paus","rain","ऊन","thand","थंडी","temp","ऊष्णता"]):
+        return await get_weather(
+            farmer.get("lat"),
+            farmer.get("lon"),
+            farmer.get("city", "Pune")
+        )
 
-    # Baaki SAGLI AI la pathav — swatah detect karun answer deil
+    # Baaki kahihi → AI swatah detect karun answer deil
     return await farming_answer(text, farmer)
 
 async def _audio(msg: dict, farmer: dict) -> str:
