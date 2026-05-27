@@ -12,17 +12,32 @@ else:
 
 SYSTEM = """Tu KrishiMitra aahe — Maharashtra madhe Onion ani Tomato shetkaryansathi expert AI sahayak.
 
-NIYAM:
-1. FAKT Marathi madhe uttar dya — English words shaktoto nahi
-2. Specific dosage sang: "Mancozeb 2g/L"
-3. Organic upay pehle, mag chemical
-4. Source: "ICAR nusar" / "Krushi Vibhag nusar"
-5. Pakke mahit nahi tar "Krushi sevak la vicharaa" sang
-6. Pune district + Maharashtra specific advice
-7. WhatsApp format: *bold*, bullet points
-8. Max 350 words — concise raha
+Tu SWATAH detect karshil farmer kaay vicharatoy:
+- Mandi bhav / market price vicharla → Real market rates sang (Pune, Lasalgaon, Nashik etc.)
+- Havaman vicharla → Weather forecast sang practical advice sobat  
+- Pik rog / disease vicharla → Specific treatment sang
+- Khate / fertilizer vicharla → Exact dosage sang
+- Sarkar yojana vicharla → Scheme details sang
+- Koni pn question vicharla → Tya topic var answer dya
 
-TOPICS: pik rog, khate, havaman, mandi bhav, sarkar yojana, irrigation, seeds, kiti control"""
+NIYAM:
+1. SAMPURN MARATHI madhe uttar dya — ek pn English word nahi
+2. Specific dosage MANDATORY: "Mancozeb 2g/L"
+3. Organic upay pehle, mag chemical
+4. Pakke mahit nahi tar "कृषी सेवकाला विचारा" sang
+5. Pune district + Maharashtra specific
+6. WhatsApp format: *bold*, bullet points •
+7. Max 400 words
+8. Practical, direct — shetkari samjel ase
+
+MARATHI SHABD VAPRA:
+- Market/Mandi → मंडई / बाजार
+- Rate/Price → भाव / किंमत  
+- Farmer → शेतकरी
+- Crop → पीक
+- Disease → रोग
+- Fertilizer → खत
+- Weather → हवामान"""
 
 async def farming_answer(question: str, farmer: dict) -> str:
     if not GEMINI_API_KEY:
@@ -30,14 +45,19 @@ async def farming_answer(question: str, farmer: dict) -> str:
     try:
         crops = ", ".join(farmer.get("crops", ["onion", "tomato"]))
         city = farmer.get("city", "Pune")
+        district = farmer.get("district", "Pune")
+
         model = genai.GenerativeModel("gemini-2.0-flash-lite")
         prompt = f"""{SYSTEM}
 
-शेतकरी माहिती: {city}, Maharashtra | पिके: {crops}
+शेतकरी माहिती:
+• ठिकाण: {city}, {district}, Maharashtra
+• पिके: {crops}
 
 प्रश्न: {question}
 
-मराठीत practical उत्तर द्या:"""
+संपूर्ण मराठीत practical उत्तर द्या:"""
+
         r = model.generate_content(
             prompt,
             generation_config=genai.types.GenerationConfig(
@@ -70,7 +90,7 @@ async def disease_detect(image_bytes: bytes, caption: str, farmer: dict) -> str:
         crops = ", ".join(farmer.get("crops", ["onion", "tomato"]))
         model = genai.GenerativeModel("gemini-2.0-flash-lite")
         prompt = f"""तू Maharashtra कृषी रोग निदान Expert आहेस.
-फोटो पाहून मराठीत सांग:
+फोटो पाहून संपूर्ण मराठीत सांग:
 
 🌿 *पिकाचे नाव:*
 🦠 *रोगाचे नाव:*
@@ -79,7 +99,7 @@ async def disease_detect(image_bytes: bytes, caption: str, farmer: dict) -> str:
 
 💊 *उपाय:*
 • सेंद्रिय: (specific + कसे वापरायचे)
-• रासायनिक: (exact product + dosage)
+• रासायनिक: (exact product + dosage g/L)
 • फवारणी वेळ:
 
 🛡️ *प्रतिबंधक उपाय:*
@@ -87,6 +107,7 @@ async def disease_detect(image_bytes: bytes, caption: str, farmer: dict) -> str:
 
 शेतकरी {crops} घेतो. {f'टीप: {caption}' if caption else ''}
 नक्की माहित नाही तर तज्ञाला दाखवा सांग."""
+
         r = model.generate_content(
             [prompt, {"mime_type": "image/jpeg", "data": b64}]
         )
@@ -102,28 +123,7 @@ async def disease_detect(image_bytes: bytes, caption: str, farmer: dict) -> str:
         return "❌ *फोटो तपासता आला नाही.*\nस्वच्छ, प्रकाशात काढलेला फोटो पाठवा. 🙏"
 
 async def scheme_info(query: str) -> str:
-    if not GEMINI_API_KEY:
-        return _schemes_fallback()
-    try:
-        model = genai.GenerativeModel("gemini-2.0-flash-lite")
-        prompt = f"""तू Maharashtra शेतकरी सरकार योजना expert आहेस.
-
-योजना माहिती:
-• PM-KISAN: ₹6,000/वर्ष | pmkisan.gov.in | 155261
-• PMFBY पीक विमा: कांदा 2% premium | बँकेत अर्ज
-• किसान क्रेडिट कार्ड: ₹3L, 4% व्याज | जवळची बँक
-• ठिबक अनुदान: 55-65% सूट | कृषी विभाग
-• Maharashtra शेतकरी सन्मान: ₹12,000/वर्ष
-• माती आरोग्य कार्ड: मोफत | KVK Pune: 020-25695081
-
-प्रश्न: {query}
-
-मराठीत सांग: योजना, eligibility, कसे apply करायचे, helpline."""
-        r = model.generate_content(prompt)
-        return f"🏛️ *सरकारी योजना — KrishiMitra*\n\n{r.text.strip()}\n\n━━━━━━━━━━━━\n📞 किसान हेल्पलाइन: *1800-180-1551* (मोफत)\n📞 PM-KISAN: *155261*"
-    except Exception as e:
-        log.error(f"scheme_info: {e}")
-        return _schemes_fallback()
+    return await farming_answer(query, {"crops": ["onion", "tomato"], "city": "Pune", "district": "Pune"})
 
 async def voice_to_text(audio_bytes: bytes) -> str:
     if not GEMINI_API_KEY or not audio_bytes:
@@ -147,11 +147,3 @@ async def voice_to_text(audio_bytes: bytes) -> str:
     except Exception as e:
         log.error(f"voice_to_text: {e}")
         return ""
-
-def _schemes_fallback():
-    return ("🏛️ *मुख्य योजना:*\n\n"
-            "1️⃣ *PM-KISAN* — ₹6,000/वर्ष\n   👉 pmkisan.gov.in | 155261\n\n"
-            "2️⃣ *पीक विमा* — कांदा+टोमॅटो covered\n   👉 बँकेत अर्ज करा\n\n"
-            "3️⃣ *KCC कर्ज* — ₹3L at 4%\n   👉 जवळची बँक\n\n"
-            "4️⃣ *ठिबक अनुदान* — 55% सूट\n   👉 कृषी विभाग\n\n"
-            "📞 *1800-180-1551* (मोफत)")
