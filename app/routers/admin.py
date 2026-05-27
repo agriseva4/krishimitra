@@ -41,9 +41,10 @@ async def approve(req: ApproveReq, s: Optional[str] = Header(None, alias="X-Admi
     })
     if ok:
         await send_message(req.phone,
-            "✅ *KrishiMitra madhe Swagat!*\n\n"
-            "Tumchi nondani approve zali! 🎉\n"
-            "\"help\" pathva menu sathi. 🌾")
+            "✅ *KrishiMitra मध्ये स्वागत!*\n\n"
+            "तुमची नोंदणी approve झाली! 🎉\n\n"
+            "आता कोणताही शेतीविषयक प्रश्न विचारा 🌾\n\n"
+            "_— KrishiMitra तुमचा विश्वासनीय शेतकरी मित्र_ 🙏")
     return {"status":"approved" if ok else "failed","phone":req.phone}
 
 @router.post("/block")
