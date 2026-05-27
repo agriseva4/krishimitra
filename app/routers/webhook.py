@@ -37,16 +37,18 @@ async def receive(request: Request, bg: BackgroundTasks):
 
 async def _process(phone, msg, mtype):
     try:
+        # Acknowledgement — 100% Marathi
         ack = {
-            "image": "📸 Photo milali! Rog tapasato... (15-20 sec) 🔬",
-            "audio": "🎤 Message milala! Process hotat..."
-        }.get(mtype, "🌾 Prashn milala! Uttar tayar hotat... (thoda vel thamba)")
+            "image": "📸 *फोटो मिळाला!*\nपीक रोग तपासतो... थोडा वेळ थांबा 🔬",
+            "audio": "🎤 *व्हॉइस मेसेज मिळाला!*\nसमजून घेतो... थोडा वेळ थांबा ⏳",
+            "voice": "🎤 *व्हॉइस मेसेज मिळाला!*\nसमजून घेतो... थोडा वेळ थांबा ⏳",
+        }.get(mtype, "🌾 *प्रश्न मिळाला!*\nउत्तर तयार करतो... थोडा वेळ थांबा ⏳")
         await send_message(phone, ack)
         resp = await handle(phone, msg, mtype)
         if resp: await send_message(phone, resp)
     except Exception as e:
         log.error(f"Process {phone}: {e}")
         try:
-            await send_message(phone, "❌ Thodi adchan aali. Parat prayatna kara. 🙏")
+            await send_message(phone, "❌ *थोडी अडचण आली.*\nकृपया पुन्हा प्रयत्न करा. 🙏")
         except:
             pass
