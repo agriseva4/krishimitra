@@ -6,11 +6,7 @@ from app.config import DATA_GOV_API_KEY
 log = logging.getLogger(__name__)
 TO = httpx.Timeout(12.0, connect=5.0)
 
-# Data.gov.in API — Official Government Real Mandi Rates
-# Register at: data.gov.in/user/register (FREE)
 DATA_GOV_URL = "https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070"
-
-# Agmarknet fallback
 AGMARKNET_URL = "https://agmarknet.gov.in/SearchCmmMkt.aspx"
 
 CROP_MAP = {
@@ -29,7 +25,6 @@ async def get_mandi_prices(district: str = "Pune", crop: str = None) -> str:
     crops = [CROP_MAP.get(crop.lower(), crop.capitalize())] if crop else ["Onion", "Tomato"]
     all_prices = []
 
-    # Try Data.gov.in first (most reliable)
     if DATA_GOV_API_KEY and DATA_GOV_API_KEY != "PASTE_HERE":
         for c in crops:
             try:
@@ -38,7 +33,6 @@ async def get_mandi_prices(district: str = "Pune", crop: str = None) -> str:
             except Exception as e:
                 log.warning(f"Data.gov.in failed for {c}: {e}")
 
-    # Fallback: Agmarknet
     if not all_prices:
         for c in crops:
             try:
@@ -47,7 +41,6 @@ async def get_mandi_prices(district: str = "Pune", crop: str = None) -> str:
             except Exception as e:
                 log.warning(f"Agmarknet failed for {c}: {e}")
 
-    # Fallback: Yesterday
     if not all_prices:
         yday = (date.today() - timedelta(days=1)).strftime("%d-%b-%Y")
         for c in crops:
@@ -57,7 +50,6 @@ async def get_mandi_prices(district: str = "Pune", crop: str = None) -> str:
             except Exception as e:
                 log.warning(f"Yesterday fallback failed for {c}: {e}")
 
-    # Fallback: DB
     if not all_prices:
         from app.services.database import get_mandi_history
         for c in crops:
@@ -70,7 +62,6 @@ async def get_mandi_prices(district: str = "Pune", crop: str = None) -> str:
                 } for h in hist[:2]])
 
     if all_prices:
-        # Store for future trend analysis
         await _store(all_prices, district)
         return _fmt(all_prices, today, district)
 
@@ -79,7 +70,6 @@ async def get_mandi_prices(district: str = "Pune", crop: str = None) -> str:
 @retry(stop=stop_after_attempt(2), wait=wait_fixed(1),
        retry=retry_if_exception_type(httpx.TimeoutException))
 async def _fetch_data_gov(commodity: str, district: str) -> list:
-    """Data.gov.in — Official India Govt Mandi API"""
     params = {
         "api-key": DATA_GOV_API_KEY,
         "format": "json",
@@ -112,7 +102,6 @@ async def _fetch_data_gov(commodity: str, district: str) -> list:
 @retry(stop=stop_after_attempt(2), wait=wait_fixed(1),
        retry=retry_if_exception_type(httpx.TimeoutException))
 async def _fetch_agmarknet(commodity: str, district: str, date_str: str) -> list:
-    """Agmarknet fallback"""
     params = {
         "Tx_Commodity": commodity, "Tx_State": "Maharashtra",
         "Tx_District": district, "Tx_Market": "All",
@@ -174,48 +163,48 @@ async def get_trend(commodity: str, district: str = "Pune") -> str:
         from app.services.database import get_mandi_history
         data = await get_mandi_history(commodity, district, 7)
         if len(data) < 2:
-            return f"📊 {commodity} sathi purta data nahi abhi.\n7 divsanantarcha trend disel!"
+            return f"📊 *{commodity}* साठी पुरेसा डेटा नाही.\n७ दिवसांनंतर trend दिसेल!"
         prices = [d["modal_price"] for d in data]
         first, last = prices[0], prices[-1]
         change = last - first
         pct = (change / first * 100) if first > 0 else 0
         arrow = "📈" if change > 0 else "📉" if change < 0 else "➡️"
-        word = "vadhla" if change > 0 else "ghata" if change < 0 else "stable"
-        return (f"📊 *{commodity} 7-Din Trend — {district}*\n\n"
-                f"{arrow} Rate *{word}*: ₹{abs(change):.0f}/q ({pct:.1f}%)\n"
-                f"• 7 din pUrvi: ₹{first:.0f}/quintal\n"
-                f"• Aaj: ₹{last:.0f}/quintal\n"
-                f"• {len(data)} din cha data available\n\n"
+        word = "वाढला" if change > 0 else "घटला" if change < 0 else "स्थिर"
+        return (f"📊 *{commodity} ७-दिवस Trend — {district}*\n\n"
+                f"{arrow} भाव *{word}*: ₹{abs(change):.0f}/क्विंटल ({pct:.1f}%)\n"
+                f"• ७ दिवसांपूर्वी: ₹{first:.0f}/क्विंटल\n"
+                f"• आज: ₹{last:.0f}/क्विंटल\n"
+                f"• {len(data)} दिवसांचा डेटा उपलब्ध\n\n"
                 f"_Source: KrishiMitra DB_")
     except Exception as e:
         log.error(f"Trend: {e}")
-        return "📊 Trend calculate karta ala nahi."
+        return "📊 *Trend calculate करता आला नाही.*"
 
 def _fmt(prices: list, date_str: str, district: str) -> str:
-    lines = [f"📊 *{district} Mandi Bhav — {date_str}*\n"]
+    lines = [f"📊 *{district} मंडई भाव — {date_str}*\n"]
     seen = set()
     for p in prices:
         key = f"{p['commodity']}_{p.get('market','')}"
         if key in seen: continue
         seen.add(key)
         emoji = "🧅" if "Onion" in p["commodity"] else "🍅" if "Tomato" in p["commodity"] else "🌾"
-        src = "✅ Live" if p.get("source") in ["data.gov.in", "agmarknet"] else "📦 Stored"
+        src = "✅ Live" if p.get("source") in ["data.gov.in", "agmarknet"] else "📦 Saved"
         lines.append(
             f"{emoji} *{p['commodity']}* — {p.get('market', district)}\n"
-            f"   Min: ₹{p.get('min_price',0):.0f} | Max: ₹{p.get('max_price',0):.0f} | *Modal: ₹{p.get('modal_price',0):.0f}*/q {src}\n"
+            f"   किमान: ₹{p.get('min_price',0):.0f} | जास्तीत जास्त: ₹{p.get('max_price',0):.0f} | *Modal: ₹{p.get('modal_price',0):.0f}*/क्विंटल {src}\n"
         )
     lines.append("━━━━━━━━━━━━")
     lines.append("_Source: data.gov.in / Agmarknet_")
-    lines.append("\n💡 Trend: \"कांदा trend\" pathva")
+    lines.append("\n💡 Trend पाहण्यासाठी: \"कांदा trend\" पाठवा")
     return "\n".join(lines)
 
 def _fallback(date_str: str, district: str) -> str:
-    return (f"📊 *Mandi Bhav — {date_str}*\n\n"
-            f"⚠️ {district} cha live data unavailable.\n\n"
-            f"*Thete check kara:*\n"
+    return (f"📊 *मंडई भाव — {date_str}*\n\n"
+            f"⚠️ {district} चा live data सध्या उपलब्ध नाही.\n\n"
+            f"*इथे तपासा:*\n"
             f"🌐 agmarknet.gov.in\n"
             f"🌐 data.gov.in\n"
             f"🏪 puneapmc.org\n\n"
-            f"📞 Pune APMC: 020-24261756\n"
-            f"📞 Lasalgaon: 02550-251054\n\n"
+            f"📞 पुणे APMC: 020-24261756\n"
+            f"📞 लासलगाव: 02550-251054\n\n"
             f"_KrishiMitra_ 🌾")
