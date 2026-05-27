@@ -4,7 +4,6 @@ from app.config import GEMINI_API_KEY
 
 log = logging.getLogger(__name__)
 
-# Startup la configure kar
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
     log.info("✅ Gemini configured!")
@@ -17,7 +16,7 @@ NIYAM:
 1. FAKT Marathi madhe uttar dya — English words shaktoto nahi
 2. Specific dosage sang: "Mancozeb 2g/L"
 3. Organic upay pehle, mag chemical
-4. Source: "ICAR nusar" / "Krushi Vibhag nusar"  
+4. Source: "ICAR nusar" / "Krushi Vibhag nusar"
 5. Pakke mahit nahi tar "Krushi sevak la vicharaa" sang
 6. Pune district + Maharashtra specific advice
 7. WhatsApp format: *bold*, bullet points
@@ -31,8 +30,7 @@ async def farming_answer(question: str, farmer: dict) -> str:
     try:
         crops = ", ".join(farmer.get("crops", ["onion", "tomato"]))
         city = farmer.get("city", "Pune")
-        
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-2.0-flash-lite")
         prompt = f"""{SYSTEM}
 
 शेतकरी माहिती: {city}, Maharashtra | पिके: {crops}
@@ -40,7 +38,6 @@ async def farming_answer(question: str, farmer: dict) -> str:
 प्रश्न: {question}
 
 मराठीत practical उत्तर द्या:"""
-        
         r = model.generate_content(
             prompt,
             generation_config=genai.types.GenerationConfig(
@@ -71,8 +68,7 @@ async def disease_detect(image_bytes: bytes, caption: str, farmer: dict) -> str:
         img.save(buf, format="JPEG", quality=85)
         b64 = base64.b64encode(buf.getvalue()).decode()
         crops = ", ".join(farmer.get("crops", ["onion", "tomato"]))
-
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-2.0-flash-lite")
         prompt = f"""तू Maharashtra कृषी रोग निदान Expert आहेस.
 फोटो पाहून मराठीत सांग:
 
@@ -90,8 +86,7 @@ async def disease_detect(image_bytes: bytes, caption: str, farmer: dict) -> str:
 ⚡ *तातडी:* लगेच करा / २-३ दिवस / निरीक्षण करा
 
 शेतकरी {crops} घेतो. {f'टीप: {caption}' if caption else ''}
-नक्की माहित नाही तर "तज्ञाला दाखवा" सांग."""
-
+नक्की माहित नाही तर तज्ञाला दाखवा सांग."""
         r = model.generate_content(
             [prompt, {"mime_type": "image/jpeg", "data": b64}]
         )
@@ -110,7 +105,7 @@ async def scheme_info(query: str) -> str:
     if not GEMINI_API_KEY:
         return _schemes_fallback()
     try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-2.0-flash-lite")
         prompt = f"""तू Maharashtra शेतकरी सरकार योजना expert आहेस.
 
 योजना माहिती:
@@ -135,12 +130,12 @@ async def voice_to_text(audio_bytes: bytes) -> str:
         return ""
     try:
         import base64
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-2.0-flash-lite")
         b64 = base64.b64encode(audio_bytes).decode()
         prompt = """हे WhatsApp voice message आहे.
 यातील बोलणे EXACTLY transcribe कर — Marathi, Hindi, या English मध्ये.
 फक्त transcription दे, explanation नको.
-नीट ऐकू येत नाही तर 'UNCLEAR' लिही."""
+नीट ऐकू येत नाही तर UNCLEAR लिही."""
         r = model.generate_content([
             prompt,
             {"mime_type": "audio/ogg", "data": b64}
