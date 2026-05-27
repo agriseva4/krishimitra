@@ -1,8 +1,6 @@
 import logging
 from app.services.database import get_farmer, create_farmer, log_conv
 from app.services.ai_service import farming_answer, disease_detect, scheme_info, voice_to_text
-from app.services.mandi import get_mandi_prices, get_trend, CROP_MAP
-from app.services.weather import get_weather
 from app.services.whatsapp import get_media_url, download_media
 
 log = logging.getLogger(__name__)
@@ -20,22 +18,6 @@ WELCOME = """🙏 *नमस्कार!*
 
 तुमचा प्रश्न पाठवा 😊
 _— KrishiMitra 🌾_"""
-
-HELP = """🌾 *KrishiMitra — तुमचा AI शेतकरी मित्र*
-
-*काय विचारता येते:*
-
-1️⃣ *पीक रोग* 🔬 — पिकाचा फोटो पाठवा
-2️⃣ *खते / फवारणी* 🧪 — \"कांद्यासाठी खत सांग\"
-3️⃣ *मंडी भाव* 📊 — \"आजचे मंडी भाव\"
-4️⃣ *हवामान* 🌦️ — \"आजचे हवामान सांग\"
-5️⃣ *सरकारी योजना* 🏛️ — \"PM किसान सांग\"
-6️⃣ *व्हॉइस मेसेज* 🎤 — बोलून विचारा
-7️⃣ *कोणताही प्रश्न* 💬 — मराठीत विचारा
-
-━━━━━━━━━━━━
-📞 *किसान हेल्पलाइन:* 1800-180-1551 (मोफत)
-_KrishiMitra — शेतकऱ्यांसाठी_ 🙏"""
 
 async def handle(phone: str, message: dict, msg_type: str) -> str:
     if phone in FREE_NUMBERS:
@@ -87,84 +69,39 @@ async def _route(phone, msg, mtype, farmer):
 
 async def _text(text: str, farmer: dict) -> str:
     t = text.lower().strip()
-    district = farmer.get("district", "Pune")
 
     # Hi/Hello → Welcome
     if any(w in t for w in ["hi","hello","hey","helo","hii","नमस्कार","namaskar","hy","hye"]):
         return WELCOME
 
-    # Short replies → AI la pathav
-    if t in ["okay","ok","हो","yes","हां","thanks","thank you","👍","theek","theek ahe","accha","ठीक","बरं","बरे"]:
-        return await farming_answer(text, farmer)
-
     # Help menu
-    if any(w in t for w in ["help","madad","मदत","मदद","start","menu"]):
-        return HELP
+    if any(w in t for w in ["help","madad","मदत","start","menu"]):
+        return WELCOME
 
-    # Trend
-    if "trend" in t:
-        crop = "Onion"
-        for k, v in CROP_MAP.items():
-            if k in t:
-                crop = v
-                break
-        return await get_trend(crop, district)
-
-    # Specific crop price
-    price_words = ["bhav", "भाव", "rate", "price", "किंमत", "dar"]
-    for k, v in CROP_MAP.items():
-        if k in t and any(w in t for w in price_words):
-            return await get_mandi_prices(district, k)
-
-    # All mandi
-    if any(w in t for w in ["mandi","मंडी","bhav","भाव","market","बाजार","bajar","rate"]):
-        return await get_mandi_prices(district)
-
-    # Weather
-    if any(w in t for w in ["weather","havaman","हवामान","पाऊस","paus","rain","una","thand","temp"]):
-        return await get_weather(farmer.get("lat"), farmer.get("lon"), farmer.get("city"))
-
-    # Schemes
-    if any(w in t for w in ["yojana","योजना","scheme","sarkar","vima","विमा","kisan","किसान","subsidy","loan","कर्ज","insurance"]):
-        return await scheme_info(text)
-
-    # AI Q&A
+    # Baaki SAGLI AI la pathav — swatah detect karun answer deil
     return await farming_answer(text, farmer)
 
 async def _audio(msg: dict, farmer: dict) -> str:
     try:
-        # Audio ID milvav
         audio_data = msg.get("audio") or msg.get("voice") or {}
         audio_id = audio_data.get("id", "")
-
         if not audio_id:
             return "❌ *व्हॉइस मेसेज मिळाला नाही.*\nपुन्हा पाठवा. 🎤"
-
-        # Download audio
         url = await get_media_url(audio_id)
         if not url:
             return "❌ *व्हॉइस डाउनलोड करता आला नाही.*\nपुन्हा पाठवा. 🎤"
-
         audio_bytes = await download_media(url)
         if not audio_bytes:
             return "❌ *व्हॉइस रिकामा आहे.*\nस्पष्टपणे बोलून पाठवा. 🎤"
-
-        # Voice → Text
         transcribed = await voice_to_text(audio_bytes)
-
         if not transcribed:
             return ("🎤 *व्हॉइस ऐकला, पण नीट समजला नाही.*\n\n"
                     "कृपया:\n"
                     "• स्पष्टपणे बोला\n"
                     "• शांत ठिकाणी record करा\n"
                     "• किंवा टेक्स्ट मध्ये लिहा 📝")
-
-        log.info(f"Voice transcribed: {transcribed[:50]}")
-
-        # Transcribed text → AI answer
         answer = await _text(transcribed, farmer)
         return f"🎤 *तुम्ही म्हणालात:* _{transcribed}_\n\n{answer}"
-
     except Exception as e:
         log.error(f"Audio error: {e}")
         return "❌ *व्हॉइस process करता आला नाही.*\nटेक्स्ट मध्ये विचारा. 🙏"
