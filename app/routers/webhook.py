@@ -37,12 +37,14 @@ async def receive(request: Request, bg: BackgroundTasks):
 
 async def _process(phone, msg, mtype):
     try:
-        # Acknowledgement — 100% Marathi
-        ack = {
-            "image": "📸 *फोटो मिळाला!*\nपीक रोग तपासतो... थोडा वेळ थांबा 🔬",
-            "audio": "🎤 *व्हॉइस मेसेज मिळाला!*\nसमजून घेतो... थोडा वेळ थांबा ⏳",
-            "voice": "🎤 *व्हॉइस मेसेज मिळाला!*\nसमजून घेतो... थोडा वेळ थांबा ⏳",
-        }.get(mtype, "🌾 *प्रश्न मिळाला!*\nउत्तर तयार करतो... थोडा वेळ थांबा ⏳")
+        # 100% Marathi acknowledgement
+        ack_map = {
+            "image":  "📸 *फोटो मिळाला!*\nपीक रोग तपासतो... थोडा वेळ थांबा 🔬",
+            "audio":  "🎤 *व्हॉइस मेसेज मिळाला!*\nसमजून घेतो... थोडा वेळ थांबा ⏳",
+            "voice":  "🎤 *व्हॉइस मेसेज मिळाला!*\nसमजून घेतो... थोडा वेळ थांबा ⏳",
+            "location": "📍 *तुमचे स्थान मिळाले!*\nहवामान तपासतो... ⏳",
+        }
+        ack = ack_map.get(mtype, "🌾 *प्रश्न मिळाला!*\nउत्तर तयार करतो... थोडा वेळ थांबा ⏳")
         await send_message(phone, ack)
         resp = await handle(phone, msg, mtype)
         if resp: await send_message(phone, resp)
