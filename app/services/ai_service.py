@@ -1,11 +1,15 @@
 import logging
 import httpx
-from app.config import GROQ_API_KEY
+from app.config import GROQ_API_KEY, CEREBRAS_API_KEY
 
 log = logging.getLogger(__name__)
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-MODEL = "llama-3.1-8b-instant"
 
+GROQ_URL      = "https://api.groq.com/openai/v1/chat/completions"
+CEREBRAS_URL  = "https://api.cerebras.ai/v1/chat/completions"
+GROQ_MODEL    = "llama-3.1-8b-instant"
+CEREBRAS_MODEL = "llama-3.3-70b"
+
+# ── Agriculture Knowledge Base ─────────────────────────────────────────────
 KNOWLEDGE = {
     "onion_disease": """कांदा रोग:
 • करपा (Purple Blotch): Iprodione 2g/L + Mancozeb 2g/L, सकाळी फवारा
@@ -16,7 +20,8 @@ KNOWLEDGE = {
 • करपा (Early Blight): Mancozeb 2.5g/L
 • उशिरा करपा: Metalaxyl+Mancozeb 2.5g/L
 • फळ पोखरणारी अळी: Emamectin 0.4g/L
-• पांढरी माशी: Imidacloprid 0.3ml/L""",
+• पांढरी माशी: Imidacloprid 0.3ml/L
+• काळे डाग → Alternaria Blight: Mancozeb 2.5g/L + Copper Oxychloride 2g/L""",
     "fertilizer_onion": """कांदा खत:
 • लागवड: DAP 150kg/acre + Potash 50kg/acre
 • 15 दिवस: Urea 30kg/acre
@@ -30,54 +35,86 @@ KNOWLEDGE = {
 
 SYSTEM = """तू KrishiMitra आहेस — Maharashtra मधील शेतकऱ्यांचा जवळचा मित्र.
 
-सगळ्यात महत्त्वाचे नियम:
-1. Conversation history बघ — farmer काय बोलत होता ते लक्षात ठेव
-2. "photo nahi", "nako", "nahi re", "dis nai" — हे सगळे "नाही" चे प्रकार आहेत — समजून घे
-3. Farmer ने नकार दिला → symptoms विचार, मदत कर
-4. Generic welcome message परत देऊ नकोस
-5. छोटे उत्तर — 3-4 lines max
-6. साधी मराठी — गावरान style
+तू Llama 3.3 70B आहेस — खूप smart, accurate आणि fast!
 
-Conversation examples:
-Farmer: "rog upay sanga"
-तू: "📷 फोटो पाठवा — नक्की सांगतो"
-Farmer: "photo nahi" / "nako" / "nahi re"
-तू: "ठीक आहे 🙏 मग सांग — पाने पिवळी आहेत का तपकिरी? डाग कुठे आहेत?"
+बोलण्याची पद्धत:
+- साधी गावरान मराठी — शेतकरी समजेल अशी
+- छोटे उत्तर — 3-5 lines maximum
+- आपुलकीने बोल — robot नाही
+- Conversation history लक्षात ठेव
 
-Farmer: "kandyala problem ahe"
-तू: "काय होतंय कांद्याला? पाने वाळतायत का? रंग बदलतोय का?"
+नियम:
+1. Context मधील माहिती वापर — guess करू नकोस
+2. रोग विचारले → symptoms विचार किंवा फोटो माग
+3. Dosage EXACT सांग — context मधून
+4. नक्की माहित नाही → "कृषी सेवकाला विचारा"
+5. Short replies — 3-5 lines max
 
-कधीही:
-❌ Welcome message परत देऊ नकोस
-❌ "मला आनंद आहे" बोलू नकोस  
-❌ Guess करून चुकीचे dosage देऊ नकोस
-✅ Context बघून natural बोल
-✅ Follow-up विचार"""
+Examples:
+✅ "कांद्याला करपा दिसतोय 🍂 Mancozeb 2g/L सकाळी फवारा."
+✅ "📷 फोटो पाठवा — नक्की सांगतो."
+✅ "आज पाऊस येणार 🌧️ फवारणी उद्यावर ठेवा."
+❌ लांब paragraphs
+❌ "मला आनंद आहे..."
+❌ Generic answers"""
 
 def _get_context(question: str, farmer: dict) -> str:
     q = question.lower()
     crops = str(farmer.get("crops", [])).lower()
     parts = []
-    if any(w in q for w in ["rog","dag","piwla","kirda","disease","blight","fungus","karpa"]):
-        if any(c in crops for c in ["onion","kanda"]):
-            parts.append(KNOWLEDGE["onion_disease"])
-        if any(c in crops for c in ["tomato","tamatar"]):
-            parts.append(KNOWLEDGE["tomato_disease"])
-    if any(w in q for w in ["khata","khate","fertilizer","urea","npk","poshan"]):
-        if any(c in crops for c in ["onion","kanda"]):
-            parts.append(KNOWLEDGE["fertilizer_onion"])
-        if any(c in crops for c in ["tomato","tamatar"]):
-            parts.append(KNOWLEDGE["fertilizer_tomato"])
+    if any(w in q for w in ["rog","dag","piwla","kirda","disease","blight","fungus","karpa","kida"]):
+        if any(c in crops for c in ["onion","kanda"]): parts.append(KNOWLEDGE["onion_disease"])
+        if any(c in crops for c in ["tomato","tamatar"]): parts.append(KNOWLEDGE["tomato_disease"])
+    if any(w in q for w in ["khata","khate","fertilizer","urea","npk","poshan","khad"]):
+        if any(c in crops for c in ["onion","kanda"]): parts.append(KNOWLEDGE["fertilizer_onion"])
+        if any(c in crops for c in ["tomato","tamatar"]): parts.append(KNOWLEDGE["fertilizer_tomato"])
     return "\n\n".join(parts)
 
-async def _groq_call(messages: list, max_tokens: int = 250) -> str:
-    if not GROQ_API_KEY: return ""
+async def _cerebras_call(messages: list, max_tokens: int = 300) -> str:
+    """Cerebras 70B — Text Q&A sathi"""
+    if not CEREBRAS_API_KEY:
+        return ""
+    try:
+        async with httpx.AsyncClient(timeout=25) as c:
+            r = await c.post(
+                CEREBRAS_URL,
+                headers={
+                    "Authorization": f"Bearer {CEREBRAS_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": CEREBRAS_MODEL,
+                    "messages": messages,
+                    "max_tokens": max_tokens,
+                    "temperature": 0.2
+                }
+            )
+            if r.status_code == 200:
+                return r.json()["choices"][0]["message"]["content"].strip()
+            log.error(f"Cerebras: {r.status_code} {r.text[:100]}")
+            return ""
+    except Exception as e:
+        log.error(f"Cerebras failed: {e}")
+        return ""
+
+async def _groq_call(messages: list, max_tokens: int = 300) -> str:
+    """Groq — Fallback sathi"""
+    if not GROQ_API_KEY:
+        return ""
     try:
         async with httpx.AsyncClient(timeout=25) as c:
             r = await c.post(
                 GROQ_URL,
-                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-                json={"model": MODEL, "messages": messages, "max_tokens": max_tokens, "temperature": 0.3}
+                headers={
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": GROQ_MODEL,
+                    "messages": messages,
+                    "max_tokens": max_tokens,
+                    "temperature": 0.2
+                }
             )
             if r.status_code == 200:
                 return r.json()["choices"][0]["message"]["content"].strip()
@@ -88,35 +125,38 @@ async def _groq_call(messages: list, max_tokens: int = 250) -> str:
         return ""
 
 async def farming_answer(question: str, farmer: dict, history: list = None) -> str:
-    if not GROQ_API_KEY:
+    if not CEREBRAS_API_KEY and not GROQ_API_KEY:
         return "❌ सेवा सध्या उपलब्ध नाही. थोड्या वेळाने विचारा. 🙏"
     try:
         crops = ", ".join(farmer.get("crops", ["onion", "tomato"]))
         city = farmer.get("city", "Pune")
+        district = farmer.get("district", "Pune")
         context = _get_context(question, farmer)
 
-        # Messages list build karo
         messages = [{"role": "system", "content": SYSTEM}]
 
-        # Conversation history inject karo — AI la memory milel
+        # Conversation history inject
         if history:
-            for h in history[-3:]:  # last 3 messages
-                if h.get("user_message") and h["user_message"] != "[IMAGE]":
+            for h in history[-3:]:
+                if h.get("user_message") and h["user_message"] not in ["[IMAGE]", "[VOICE]"]:
                     messages.append({"role": "user", "content": h["user_message"]})
                 if h.get("bot_response"):
                     messages.append({"role": "assistant", "content": h["bot_response"]})
 
-        # Current question with context
-        user_content = f"शेतकरी: {city} | पिके: {crops}"
+        user_content = f"शेतकरी: {city}, {district} | पिके: {crops}"
         if context:
             user_content += f"\n\nसंदर्भ:\n{context}"
         user_content += f"\n\nप्रश्न: {question}"
-
         messages.append({"role": "user", "content": user_content})
 
-        ans = await _groq_call(messages, 250)
+        # Cerebras try karo — nahi zala tar Groq fallback
+        ans = await _cerebras_call(messages, 300)
+        if not ans:
+            log.warning("Cerebras failed, using Groq fallback")
+            ans = await _groq_call(messages, 300)
         if not ans:
             return "❌ थोडी अडचण आली. पुन्हा विचारा. 🙏"
+
         return ans
 
     except Exception as e:
@@ -124,6 +164,7 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
         return "❌ थोडी अडचण आली. पुन्हा विचारा. 🙏"
 
 async def disease_detect(image_bytes: bytes, caption: str, farmer: dict) -> str:
+    """Photo sathi Groq Vision — Cerebras la image support nahi"""
     if not image_bytes:
         return "❌ फोटो मिळाला नाही. पुन्हा पाठवा. 📸"
     try:
@@ -136,7 +177,7 @@ async def disease_detect(image_bytes: bytes, caption: str, farmer: dict) -> str:
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=85)
         b64 = base64.b64encode(buf.getvalue()).decode()
-        crops = ", ".join(farmer.get("crops", ["onion","tomato"]))
+        crops = ", ".join(farmer.get("crops", ["onion", "tomato"]))
         context = KNOWLEDGE["onion_disease"] + "\n" + KNOWLEDGE["tomato_disease"]
 
         async with httpx.AsyncClient(timeout=30) as c:
@@ -173,9 +214,10 @@ async def disease_detect(image_bytes: bytes, caption: str, farmer: dict) -> str:
         return "❌ फोटो तपासता आला नाही. स्वच्छ फोटो पाठवा. 🙏"
 
 async def scheme_info(query: str) -> str:
-    return await farming_answer(query, {"crops":["onion","tomato"],"city":"Pune","district":"Pune"})
+    return await farming_answer(query, {"crops": ["onion","tomato"], "city":"Pune", "district":"Pune"})
 
 async def voice_to_text(audio_bytes: bytes) -> str:
+    """Voice sathi Groq Whisper — Cerebras la audio support nahi"""
     if not GROQ_API_KEY or not audio_bytes: return ""
     try:
         async with httpx.AsyncClient(timeout=30) as c:
