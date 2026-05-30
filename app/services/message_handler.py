@@ -1,6 +1,6 @@
 import logging
-from app.services.database import get_farmer, create_farmer, log_conv
-from app.services.ai_service import farming_answer, disease_detect, scheme_info, voice_to_text
+from app.services.database import get_farmer, create_farmer, log_conv, get_last_messages
+from app.services.ai_service import farming_answer, disease_detect, voice_to_text
 from app.services.weather import get_weather
 from app.services.whatsapp import get_media_url, download_media
 
@@ -50,7 +50,7 @@ async def _route(phone, msg, mtype, farmer):
         if mtype == "text":
             text = msg.get("text", {}).get("body", "").strip()
             if not text: return WELCOME
-            resp = await _text(text, farmer)
+            resp = await _text(phone, text, farmer)
             await log_conv(phone, text, resp, "text")
             return resp
         elif mtype == "image":
@@ -68,23 +68,26 @@ async def _route(phone, msg, mtype, farmer):
         log.error(f"Route {phone}: {e}")
         return "❌ *थोडी अडचण आली.*\nकृपया पुन्हा प्रयत्न करा. 🙏"
 
-async def _text(text: str, farmer: dict) -> str:
+async def _text(phone: str, text: str, farmer: dict) -> str:
     t = text.lower().strip()
 
     # Hi/Hello → Welcome
-    if any(w in t for w in ["hi","hello","hey","helo","hii","नमस्कार","namaskar","hy","hye"]):
+    if t in ["hi","hello","hey","helo","hii","नमस्कार","namaskar","hy","hye","start"]:
         return WELCOME
 
-    # Weather → Direct OpenWeather API (short & real)
-    if any(w in t for w in ["weather","havaman","हवामान","पाऊस","paus","rain","ऊन","thand","थंडी","temp","ऊष्णता"]):
+    # Weather → Direct OpenWeather API
+    if any(w in t for w in ["weather","havaman","हवामान","पाऊस","paus","rain","ऊन","thand","थंडी","temp"]):
         return await get_weather(
             farmer.get("lat"),
             farmer.get("lon"),
             farmer.get("city", "Pune")
         )
 
-    # Baaki kahihi → AI swatah detect karun answer deil
-    return await farming_answer(text, farmer)
+    # Last 3 messages fetch karo — conversation context
+    history = await get_last_messages(phone, limit=3)
+
+    # AI la full context do — swatah samjel
+    return await farming_answer(text, farmer, history)
 
 async def _audio(msg: dict, farmer: dict) -> str:
     try:
@@ -101,11 +104,10 @@ async def _audio(msg: dict, farmer: dict) -> str:
         transcribed = await voice_to_text(audio_bytes)
         if not transcribed:
             return ("🎤 *व्हॉइस ऐकला, पण नीट समजला नाही.*\n\n"
-                    "कृपया:\n"
-                    "• स्पष्टपणे बोला\n"
-                    "• शांत ठिकाणी record करा\n"
+                    "कृपया:\n• स्पष्टपणे बोला\n• शांत ठिकाणी record करा\n"
                     "• किंवा टेक्स्ट मध्ये लिहा 📝")
-        answer = await _text(transcribed, farmer)
+        history = await get_last_messages(phone, limit=3)
+        answer = await farming_answer(transcribed, farmer, history)
         return f"🎤 *तुम्ही म्हणालात:* _{transcribed}_\n\n{answer}"
     except Exception as e:
         log.error(f"Audio error: {e}")
