@@ -38,13 +38,30 @@ async def create_farmer(phone: str):
             return
         db.table("farmers").insert({
             "phone": phone, "is_approved": False, "is_free": False,
-            "is_blocked": False, "district": "Pune", "city": "Pune",
+            "is_blocked": False, "district": "", "city": "",
             "lat": 18.5204, "lon": 73.8567,
-            "crops": ["onion", "tomato"], "language": "mr"
+            "crops": ["onion", "tomato"], "language": "mr",
+            "location_set": False
         }).execute()
         log.info(f"New farmer: {phone}")
     except Exception as e:
         log.error(f"create_farmer: {e}")
+
+async def update_farmer_location(phone: str, district: str, info: dict):
+    """District select kela tar location update kar"""
+    try:
+        db = get_db()
+        if not db: return
+        db.table("farmers").update({
+            "district": district.capitalize(),
+            "city": district.capitalize(),
+            "lat": info["lat"],
+            "lon": info["lon"],
+            "location_set": True
+        }).eq("phone", phone).execute()
+        log.info(f"Location updated: {phone} → {district}")
+    except Exception as e:
+        log.error(f"update_farmer_location: {e}")
 
 async def get_all_farmers() -> list:
     try:
@@ -57,7 +74,6 @@ async def get_all_farmers() -> list:
         return []
 
 async def get_last_messages(phone: str, limit: int = 3) -> list:
-    """Last N messages fetch karo — AI la conversation memory milel"""
     try:
         db = get_db()
         if not db: return []
@@ -67,7 +83,6 @@ async def get_last_messages(phone: str, limit: int = 3) -> list:
             .order("created_at", desc=True)\
             .limit(limit)\
             .execute()
-        # Reverse karo — oldest first
         return list(reversed(r.data or []))
     except Exception as e:
         log.warning(f"get_last_messages: {e}")
