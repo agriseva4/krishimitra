@@ -1,5 +1,4 @@
 import logging
-import traceback
 from typing import Optional
 from app.config import SUPABASE_URL, SUPABASE_KEY
 
@@ -13,13 +12,12 @@ def get_db():
         log.error("❌ Supabase keys missing!")
         return None
     try:
-        from supabase.client import Client, create_client
+        from supabase import create_client
         _db = create_client(SUPABASE_URL, SUPABASE_KEY)
         log.info("✅ Supabase connected!")
         return _db
     except Exception as e:
-        log.error(f"Supabase full error: {repr(e)}")
-        traceback.print_exc()
+        log.error(f"Supabase error: {e}")
         return None
 
 async def get_farmer(phone: str) -> Optional[dict]:
@@ -56,6 +54,23 @@ async def get_all_farmers() -> list:
         return r.data or []
     except Exception as e:
         log.error(f"get_all_farmers: {e}")
+        return []
+
+async def get_last_messages(phone: str, limit: int = 3) -> list:
+    """Last N messages fetch karo — AI la conversation memory milel"""
+    try:
+        db = get_db()
+        if not db: return []
+        r = db.table("conversations")\
+            .select("user_message,bot_response")\
+            .eq("farmer_phone", phone)\
+            .order("created_at", desc=True)\
+            .limit(limit)\
+            .execute()
+        # Reverse karo — oldest first
+        return list(reversed(r.data or []))
+    except Exception as e:
+        log.warning(f"get_last_messages: {e}")
         return []
 
 async def log_conv(phone: str, user: str, bot: str, mtype: str = "text"):
