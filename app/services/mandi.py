@@ -9,6 +9,22 @@ TO = httpx.Timeout(12.0, connect=5.0)
 DATA_GOV_URL = "https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070"
 AGMARKNET_URL = "https://agmarknet.gov.in/SearchCmmMkt.aspx"
 
+# District → Markets mapping
+DISTRICT_MARKETS = {
+    "pune":       ["Pune", "Pimpri"],
+    "nashik":     ["Lasalgaon", "Pimpalgaon", "Ozar", "Rahuri"],
+    "solapur":    ["Solapur", "Pandharpur"],
+    "ahmednagar": ["Rahuri", "Shrirampur", "Ahmednagar"],
+    "mumbai":     ["Vashi"],
+    "sangli":     ["Sangli", "Miraj"],
+    "satara":     ["Satara", "Karad"],
+    "kolhapur":   ["Kolhapur"],
+    "jalgaon":    ["Jalgaon", "Bhusawal"],
+    "aurangabad": ["Aurangabad", "Lasur"],
+    "latur":      ["Latur", "Udgir"],
+    "nanded":     ["Nanded", "Mudkhed"],
+}
+
 CROP_MAP = {
     "kandya": "Onion", "kanda": "Onion", "कांदा": "Onion", "onion": "Onion",
     "tomato": "Tomato", "tamatar": "Tomato", "टोमॅटो": "Tomato",
@@ -23,33 +39,43 @@ CROP_MAP = {
 async def get_mandi_prices(district: str = "Pune", crop: str = None) -> str:
     today = date.today().strftime("%d-%b-%Y")
     crops = [CROP_MAP.get(crop.lower(), crop.capitalize())] if crop else ["Onion", "Tomato"]
+
+    # District nusar markets get karo
+    district_lower = district.lower()
+    markets = DISTRICT_MARKETS.get(district_lower, [district])
+
     all_prices = []
 
-    if DATA_GOV_API_KEY and DATA_GOV_API_KEY != "PASTE_HERE":
+    # Pratyek market sathi data fetch karo
+    for market in markets:
         for c in crops:
-            try:
-                prices = await _fetch_data_gov(c, district)
-                all_prices.extend(prices)
-            except Exception as e:
-                log.warning(f"Data.gov.in failed for {c}: {e}")
+            # Try Data.gov.in first
+            if DATA_GOV_API_KEY and DATA_GOV_API_KEY != "PASTE_HERE":
+                try:
+                    prices = await _fetch_data_gov(c, district, market)
+                    all_prices.extend(prices)
+                except Exception as e:
+                    log.warning(f"Data.gov {market} {c}: {e}")
 
-    if not all_prices:
-        for c in crops:
-            try:
-                prices = await _fetch_agmarknet(c, district, today)
-                all_prices.extend(prices)
-            except Exception as e:
-                log.warning(f"Agmarknet failed for {c}: {e}")
+            # Fallback: Agmarknet
+            if not any(p.get("market") == market for p in all_prices):
+                try:
+                    prices = await _fetch_agmarknet(c, district, today, market)
+                    all_prices.extend(prices)
+                except Exception as e:
+                    log.warning(f"Agmarknet {market} {c}: {e}")
 
+    # Yesterday fallback
     if not all_prices:
         yday = (date.today() - timedelta(days=1)).strftime("%d-%b-%Y")
         for c in crops:
             try:
                 prices = await _fetch_agmarknet(c, district, yday)
                 all_prices.extend(prices)
-            except Exception as e:
-                log.warning(f"Yesterday fallback failed for {c}: {e}")
+            except:
+                pass
 
+    # DB history fallback
     if not all_prices:
         from app.services.database import get_mandi_history
         for c in crops:
@@ -58,8 +84,8 @@ async def get_mandi_prices(district: str = "Pune", crop: str = None) -> str:
                 all_prices.extend([{
                     "commodity": h["commodity"], "market": h["market"],
                     "min_price": h["min_price"], "max_price": h["max_price"],
-                    "modal_price": h["modal_price"], "source": "stored"
-                } for h in hist[:2]])
+                    "modal_price": h["modal_price"], "source": "saved"
+                } for h in hist[:3]])
 
     if all_prices:
         await _store(all_prices, district)
@@ -69,7 +95,7 @@ async def get_mandi_prices(district: str = "Pune", crop: str = None) -> str:
 
 @retry(stop=stop_after_attempt(2), wait=wait_fixed(1),
        retry=retry_if_exception_type(httpx.TimeoutException))
-async def _fetch_data_gov(commodity: str, district: str) -> list:
+async def _fetch_data_gov(commodity: str, district: str, market: str = None) -> list:
     params = {
         "api-key": DATA_GOV_API_KEY,
         "format": "json",
@@ -78,38 +104,38 @@ async def _fetch_data_gov(commodity: str, district: str) -> list:
         "filters[District]": district,
         "filters[Commodity]": commodity,
     }
+    if market:
+        params["filters[Market]"] = market
     async with httpx.AsyncClient(timeout=TO) as c:
         r = await c.get(DATA_GOV_URL, params=params)
         if r.status_code == 200:
-            data = r.json()
-            records = data.get("records", [])
+            records = r.json().get("records", [])
             results = []
             for rec in records[:4]:
                 try:
                     results.append({
                         "commodity": rec.get("Commodity", commodity),
-                        "market": rec.get("Market", district),
+                        "market": rec.get("Market", market or district),
                         "min_price": float(rec.get("Min Price", 0) or 0),
                         "max_price": float(rec.get("Max Price", 0) or 0),
                         "modal_price": float(rec.get("Modal Price", 0) or 0),
-                        "source": "data.gov.in"
+                        "source": "live"
                     })
-                except (ValueError, TypeError):
-                    continue
+                except: continue
             return results
     return []
 
 @retry(stop=stop_after_attempt(2), wait=wait_fixed(1),
        retry=retry_if_exception_type(httpx.TimeoutException))
-async def _fetch_agmarknet(commodity: str, district: str, date_str: str) -> list:
+async def _fetch_agmarknet(commodity: str, district: str, date_str: str, market: str = "All") -> list:
     params = {
         "Tx_Commodity": commodity, "Tx_State": "Maharashtra",
-        "Tx_District": district, "Tx_Market": "All",
+        "Tx_District": district, "Tx_Market": market,
         "DateFrom": date_str, "DateTo": date_str,
         "Fr_Date": date_str, "To_Date": date_str,
         "Tx_Trend": "0", "Tx_CommodityHead": commodity,
         "Tx_StateHead": "Maharashtra", "Tx_DistrictHead": district,
-        "Tx_MarketHead": "All"
+        "Tx_MarketHead": market
     }
     async with httpx.AsyncClient(timeout=TO) as c:
         r = await c.get(AGMARKNET_URL, params=params)
@@ -131,16 +157,15 @@ def _parse(html: str, commodity: str) -> list:
                     results.append({
                         "commodity": commodity,
                         "market": cols[2],
-                        "min_price": float(cols[4].replace(",", "") or 0),
-                        "max_price": float(cols[5].replace(",", "") or 0),
-                        "modal_price": float(cols[6].replace(",", "") or 0),
-                        "source": "agmarknet"
+                        "min_price": float(cols[4].replace(",","") or 0),
+                        "max_price": float(cols[5].replace(",","") or 0),
+                        "modal_price": float(cols[6].replace(",","") or 0),
+                        "source": "live"
                     })
-                except (ValueError, IndexError):
-                    continue
+                except: continue
         return results
     except Exception as e:
-        log.error(f"Parse error: {e}")
+        log.error(f"Parse: {e}")
         return []
 
 async def _store(prices: list, district: str):
@@ -172,13 +197,11 @@ async def get_trend(commodity: str, district: str = "Pune") -> str:
         word = "वाढला" if change > 0 else "घटला" if change < 0 else "स्थिर"
         return (f"📊 *{commodity} ७-दिवस Trend — {district}*\n\n"
                 f"{arrow} भाव *{word}*: ₹{abs(change):.0f}/क्विंटल ({pct:.1f}%)\n"
-                f"• ७ दिवसांपूर्वी: ₹{first:.0f}/क्विंटल\n"
-                f"• आज: ₹{last:.0f}/क्विंटल\n"
-                f"• {len(data)} दिवसांचा डेटा उपलब्ध\n\n"
+                f"• ७ दिवसांपूर्वी: ₹{first:.0f}\n• आज: ₹{last:.0f}\n\n"
                 f"_Source: KrishiMitra DB_")
     except Exception as e:
         log.error(f"Trend: {e}")
-        return "📊 *Trend calculate करता आला नाही.*"
+        return "📊 Trend calculate करता आला नाही."
 
 def _fmt(prices: list, date_str: str, district: str) -> str:
     lines = [f"📊 *{district} मंडई भाव — {date_str}*\n"]
@@ -188,23 +211,24 @@ def _fmt(prices: list, date_str: str, district: str) -> str:
         if key in seen: continue
         seen.add(key)
         emoji = "🧅" if "Onion" in p["commodity"] else "🍅" if "Tomato" in p["commodity"] else "🌾"
-        src = "✅ Live" if p.get("source") in ["data.gov.in", "agmarknet"] else "📦 Saved"
+        src = "✅ Live" if p.get("source") == "live" else "📦 Saved"
         lines.append(
             f"{emoji} *{p['commodity']}* — {p.get('market', district)}\n"
-            f"   किमान: ₹{p.get('min_price',0):.0f} | जास्तीत जास्त: ₹{p.get('max_price',0):.0f} | *Modal: ₹{p.get('modal_price',0):.0f}*/क्विंटल {src}\n"
+            f"   किमान: ₹{p.get('min_price',0):.0f} | कमाल: ₹{p.get('max_price',0):.0f} | "
+            f"*Modal: ₹{p.get('modal_price',0):.0f}*/क्विंटल {src}\n"
         )
     lines.append("━━━━━━━━━━━━")
     lines.append("_Source: data.gov.in / Agmarknet_")
-    lines.append("\n💡 Trend पाहण्यासाठी: \"कांदा trend\" पाठवा")
     return "\n".join(lines)
 
 def _fallback(date_str: str, district: str) -> str:
-    return (f"📊 *मंडई भाव — {date_str}*\n\n"
-            f"⚠️ {district} चा live data सध्या उपलब्ध नाही.\n\n"
+    markets = DISTRICT_MARKETS.get(district.lower(), [district])
+    market_str = ", ".join(markets)
+    return (f"📊 *{district} मंडई भाव — {date_str}*\n\n"
+            f"⚠️ Live data सध्या उपलब्ध नाही.\n\n"
+            f"*{district} जवळच्या मंडया:* {market_str}\n\n"
             f"*इथे तपासा:*\n"
             f"🌐 agmarknet.gov.in\n"
-            f"🌐 data.gov.in\n"
-            f"🏪 puneapmc.org\n\n"
-            f"📞 पुणे APMC: 020-24261756\n"
-            f"📞 लासलगाव: 02550-251054\n\n"
+            f"🌐 data.gov.in\n\n"
+            f"📞 किसान हेल्पलाइन: 1800-180-1551\n"
             f"_KrishiMitra_ 🌾")
