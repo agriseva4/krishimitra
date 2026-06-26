@@ -110,7 +110,8 @@ async def handle(phone: str, message: dict, msg_type: str) -> str:
     if farmer.get("is_blocked"):
         return ""
 
-    if not farmer.get("district") or farmer.get("district") == "Pune" and not farmer.get("location_set"):
+    # Fixed: clean check — location_set flag already tracks this
+    if not farmer.get("location_set"):
         if msg_type == "text":
             text = message.get("text", {}).get("body", "").strip()
             district = _detect_district(text)
@@ -122,6 +123,8 @@ async def handle(phone: str, message: dict, msg_type: str) -> str:
                         f"📍 तुमच्या जवळच्या मंडया: *{markets}*\n\n"
                         f"आता शेतीविषयक काहीही विचारा 🌾\n"
                         f"_— KrishiMitra_ 🙏")
+            else:
+                return DISTRICT_SELECT
 
     return await _route(phone, message, msg_type, farmer)
 
