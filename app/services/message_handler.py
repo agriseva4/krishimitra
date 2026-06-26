@@ -9,7 +9,6 @@ log = logging.getLogger(__name__)
 
 FREE_NUMBERS = []
 
-# ── District → Markets Mapping ─────────────────────────────────────────────
 DISTRICT_MARKETS = {
     "pune":       {"lat": 18.5204, "lon": 73.8567, "markets": ["Pune", "Pimpri"]},
     "nashik":     {"lat": 20.0059, "lon": 73.7897, "markets": ["Lasalgaon", "Pimpalgaon", "Ozar", "Rahuri"]},
@@ -27,7 +26,6 @@ DISTRICT_MARKETS = {
     "dhule":      {"lat": 20.9042, "lon": 74.7749, "markets": ["Dhule", "Shirpur"]},
 }
 
-# ── District Selection Message ─────────────────────────────────────────────
 DISTRICT_SELECT = """🌾 *KrishiMitra मध्ये आपले स्वागत आहे!*
 
 तुमचा जिल्हा सांगा — त्यानुसार हवामान व मंडई भाव मिळेल 👇
@@ -59,20 +57,19 @@ WELCOME = """🙏 *नमस्कार!*
 तुमचा प्रश्न पाठवा 😊
 _— KrishiMitra 🌾_"""
 
-# ── District Detection ─────────────────────────────────────────────────────
 DISTRICT_KEYWORDS = {
-    "pune": ["pune", "पुणे", "1"],
-    "nashik": ["nashik", "nasik", "नाशिक", "2"],
-    "solapur": ["solapur", "सोलापूर", "3"],
+    "pune":       ["pune", "पुणे", "1"],
+    "nashik":     ["nashik", "nasik", "नाशिक", "2"],
+    "solapur":    ["solapur", "सोलापूर", "3"],
     "ahmednagar": ["ahmednagar", "nagar", "अहमदनगर", "4"],
-    "mumbai": ["mumbai", "vashi", "मुंबई", "वाशी", "5"],
-    "sangli": ["sangli", "सांगली", "6"],
-    "satara": ["satara", "सातारा", "7"],
-    "kolhapur": ["kolhapur", "कोल्हापूर", "8"],
-    "jalgaon": ["jalgaon", "जळगाव", "9"],
+    "mumbai":     ["mumbai", "vashi", "मुंबई", "वाशी", "5"],
+    "sangli":     ["sangli", "सांगली", "6"],
+    "satara":     ["satara", "सातारा", "7"],
+    "kolhapur":   ["kolhapur", "कोल्हापूर", "8"],
+    "jalgaon":    ["jalgaon", "जळगाव", "9"],
     "aurangabad": ["aurangabad", "औरंगाबाद", "10"],
-    "latur": ["latur", "लातूर", "11"],
-    "nanded": ["nanded", "नांदेड", "12"],
+    "latur":      ["latur", "लातूर", "11"],
+    "nanded":     ["nanded", "नांदेड", "12"],
 }
 
 def _detect_district(text: str) -> str:
@@ -81,6 +78,18 @@ def _detect_district(text: str) -> str:
         if any(k in t for k in keywords):
             return district
     return ""
+
+WEATHER_WORDS = [
+    "weather", "havaman", "हवामान", "पाऊस", "paus", "rain",
+    "ऊन", "thand", "थंडी", "temp", "temperature", "उद्या",
+    "उन्हाळा", "garmi", "थंड", "warm", "cold", "forecast"
+]
+
+MANDI_WORDS = [
+    "bhav", "भाव", "mandi", "मंडई", "market", "बाजार",
+    "rate", "किंमत", "price", "kanda", "tamatar", "दर",
+    "aaj", "today", "आजचा"
+]
 
 async def handle(phone: str, message: dict, msg_type: str) -> str:
     if phone in FREE_NUMBERS:
@@ -101,7 +110,6 @@ async def handle(phone: str, message: dict, msg_type: str) -> str:
     if farmer.get("is_blocked"):
         return ""
 
-    # District set nahi asel tar vichar
     if not farmer.get("district") or farmer.get("district") == "Pune" and not farmer.get("location_set"):
         if msg_type == "text":
             text = message.get("text", {}).get("body", "").strip()
@@ -143,27 +151,21 @@ async def _route(phone, msg, mtype, farmer):
 async def _text(phone: str, text: str, farmer: dict) -> str:
     t = text.lower().strip()
 
-    # Hi/Hello → Welcome
-    if t in ["hi","hello","hey","helo","hii","नमस्कार","namaskar","hy","hye","start"]:
+    if t in ["hi", "hello", "hey", "helo", "hii", "नमस्कार", "namaskar", "hy", "hye", "start"]:
         return WELCOME
 
-    # Weather → Direct OpenWeather API — farmer chya location nusar
-    if any(w in t for w in ["weather","havaman","हवामान","पाऊस","paus","rain","ऊन","thand","थंडी","temp"]):
+    if any(w in t for w in WEATHER_WORDS):
         return await get_weather(
             farmer.get("lat", 18.5204),
             farmer.get("lon", 73.8567),
             farmer.get("city", farmer.get("district", "Pune"))
         )
 
-    # Mandi → farmer chya district nusar
-    if any(w in t for w in ["bhav","भाव","mandi","मंडई","market","बाजार","rate","किंमत"]):
+    if any(w in t for w in MANDI_WORDS):
         district = farmer.get("district", "Pune")
         return await get_mandi_prices(district)
 
-    # Conversation history fetch
-    history = await get_last_messages(phone, limit=3)
-
-    # AI la pathav
+    history = await get_last_messages(phone, limit=6)
     return await farming_answer(text, farmer, history)
 
 async def _audio(msg: dict, farmer: dict) -> str:
@@ -184,7 +186,7 @@ async def _audio(msg: dict, farmer: dict) -> str:
                     "कृपया:\n• स्पष्टपणे बोला\n"
                     "• शांत ठिकाणी record करा\n"
                     "• किंवा टेक्स्ट मध्ये लिहा 📝")
-        history = await get_last_messages(phone, limit=3)
+        history = await get_last_messages(phone, limit=6)
         answer = await farming_answer(transcribed, farmer, history)
         return f"🎤 *तुम्ही म्हणालात:* _{transcribed}_\n\n{answer}"
     except Exception as e:
