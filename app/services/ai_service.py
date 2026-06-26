@@ -6,175 +6,321 @@ log = logging.getLogger(__name__)
 
 GROQ_URL       = "https://api.groq.com/openai/v1/chat/completions"
 CEREBRAS_URL   = "https://api.cerebras.ai/v1/chat/completions"
-GROQ_MODEL     = "llama-3.1-8b-instant"
+GROQ_MODEL     = "llama-3.3-70b-versatile"   # upgraded: 8b → 70b
 CEREBRAS_MODEL = "llama-3.3-70b"
 
+# ── Knowledge Base ─────────────────────────────────────────────────────────
 KNOWLEDGE = {
-    "onion_disease": """कांदा रोग:
-• करपा (Purple Blotch): Iprodione 2g/L + Mancozeb 2g/L, सकाळी फवारा
-• फुलकिडे (Thrips): Fipronil 1.5ml/L, 7 दिवसांनी पुन्हा
-• मर रोग (Stemphylium): Chlorothalonil 2g/L
-• मूळकूज: Metalaxyl 2g/L ड्रेंचिंग
-• प्रतिबंध: Copper Oxychloride 3g/L दर 10 दिवसांनी""",
+    "onion_disease": """कांदा रोग माहिती:
 
-    "tomato_disease": """टोमॅटो रोग:
-• करपा (Early Blight): Mancozeb 2.5g/L, 10 दिवसांनी पुन्हा
-• उशिरा करपा: Metalaxyl+Mancozeb 2.5g/L
-• काळे डाग (Alternaria): Mancozeb 2.5g/L + Copper Oxychloride 2g/L
-• फळ पोखरणारी अळी: Emamectin 0.4g/L संध्याकाळी
-• पांढरी माशी: Imidacloprid 0.3ml/L
-• विषाणू रोग: रोगी झाडे उपटा, पांढरी माशी नियंत्रण""",
+करपा / जांभळे डाग (Purple Blotch):
+- लक्षणे: पानावर जांभळ्या/तपकिरी रंगाचे लांबट डाग, कडा पिवळ्या
+- उपाय: Iprodione (Rovral) 2g + Mancozeb (Dithane M-45) 2g प्रति लिटर पाणी
+- फवारणी: सकाळी 7-9 वाजता, 10 दिवसांनी पुन्हा
+- 15 लिटर पंपाला: Rovral 30g + Dithane M-45 30g
 
-    "fertilizer_onion": """कांदा खत:
-• लागवड: FYM 4 टन/acre + DAP 150kg/acre + Potash 50kg/acre
-• 15 दिवस: Urea 30kg/acre
-• 30 दिवस: 19:19:19 @ 5g/L फवारणी
-• 45 दिवस: Potash 25kg/acre
-• फुलोरा: खत बंद""",
+फुलकिडे / थ्रिप्स:
+- लक्षणे: पाने चंदेरी/पांढरी दिसतात, वाकडी होतात, छोटे किडे दिसतात
+- उपाय: Fipronil (Regent) 1.5ml प्रति लिटर
+- 15 लिटर पंपाला: Regent 22ml
+- 7 दिवसांनी पुन्हा फवारा
 
-    "fertilizer_tomato": """टोमॅटो खत:
-• लागवड: FYM 5 टन/acre + DAP 100kg/acre
-• 15 दिवस: Urea 25kg/acre
-• 30 दिवस: 13:40:13 @ 5g/L फवारणी
-• फळधारणा: Calcium Nitrate 3g/L + Boron 1g/L
-• पक्वता: Potash 50kg/acre""",
+मर रोग / झाड मरणे:
+- लक्षणे: झाड अचानक पिवळे पडून मरते, मुळे कुजतात
+- उपाय: Metalaxyl (Ridomil) 2g प्रति लिटर — मातीत ओता (drenching)
+- 15 लिटर पंपाला: Ridomil 30g
 
-    "seasonal_calendar": """Maharashtra Seasonal Calendar:
-Kharif (June-October): Soybean, Tur, Maize, Cotton, Bhendi, Kakdi, Dudhi
-Rabi (October-March): Onion, Tomato, Wheat, Harbhara
+मूळकूज:
+- लक्षणे: मुळे काळी/तपकिरी होतात, झाड ओढले तर सहज निघते
+- उपाय: Copper Oxychloride (Blitox) 3g प्रति लिटर drenching
+- 15 लिटर पंपाला: Blitox 45g
 
-June madhe yogya: Soybean, Tur, Maize, Cotton, Bhendi
-June madhe onion/tomato lagvad nahi — July-August madhe ropvatika""",
+पाने पिवळी पडणे (Downy Mildew):
+- लक्षणे: पानावर पिवळे ठिपके, खालच्या बाजूस राखाडी बुरशी
+- उपाय: Metalaxyl+Mancozeb (Ridomil Gold) 2.5g प्रति लिटर
+- 10 दिवसांनी पुन्हा""",
 
-    "pest_control": """किडे नियंत्रण:
-• फुलकिडे: Fipronil 1.5ml/L
-• मावा: Imidacloprid 0.3ml/L
-• अळी: Emamectin 0.4g/L
-• पांढरी माशी: Imidacloprid 0.3ml/L
-• फवारणी: सकाळी 7-9 किंवा संध्याकाळी 5-7""",
+    "tomato_disease": """टोमॅटो रोग माहिती:
+
+लवकर करपा (Early Blight / Alternaria):
+- लक्षणे: पानावर तपकिरी डाग, आतमध्ये वलय (rings), खालची पाने आधी
+- उपाय: Mancozeb (Dithane M-45) 2.5g प्रति लिटर
+- 15 लिटर पंपाला: 37g, 10 दिवसांनी पुन्हा
+
+उशिरा करपा (Late Blight):
+- लक्षणे: पाने/फळ काळे पडतात, ओले दिसतात, वेगाने पसरते
+- उपाय: Metalaxyl+Mancozeb (Ridomil Gold) 2.5g प्रति लिटर — तातडीने
+- 15 लिटर पंपाला: 37g, 7 दिवसांनी पुन्हा
+
+फळ पोखरणारी अळी (Helicoverpa):
+- लक्षणे: फळावर गोल छिद्र, आतमध्ये अळी, फळ सडते
+- उपाय: Emamectin Benzoate (Proclaim) 0.4g प्रति लिटर — संध्याकाळी
+- 15 लिटर पंपाला: 6g
+
+पांढरी माशी (Whitefly) + Virus:
+- लक्षणे: पांढरे छोटे किडे, पाने वाकडी/पिवळी, झाड खुजे राहते
+- उपाय: Imidacloprid (Confidor) 0.3ml प्रति लिटर
+- 15 लिटर पंपाला: 4.5ml
+
+मोज़ेक व्हायरस:
+- लक्षणे: पाने चुरगळतात, पिवळे-हिरवे ठिपके, झाड वाढत नाही
+- उपाय: रोगी झाडे उपटून जाळा, पांढरी माशी नियंत्रण करा
+- कोणतेही औषध virus ला मारत नाही""",
+
+    "fertilizer_onion": """कांदा खत वेळापत्रक:
+
+लागवड वेळी (Basal):
+- शेणखत (FYM): 4 टन प्रति एकर — लागवडीआधी मातीत मिसळा
+- DAP: 150 kg प्रति एकर (Phosphorus साठी)
+- Potash (MOP): 50 kg प्रति एकर
+
+15 दिवसांनी:
+- Urea: 30 kg प्रति एकर — ओलाव्यात द्या
+
+30 दिवसांनी:
+- 19:19:19 खत: 5g प्रति लिटर पाण्यात — फवारणी
+- 15 लिटर पंपाला: 75g
+
+45 दिवसांनी:
+- Potash (MOP): 25 kg प्रति एकर
+
+फुलोरा आल्यावर: खत पूर्णपणे बंद करा
+
+कांदा वाढत नाही / लहान राहतो:
+- Zinc Sulphate 5g/L फवारा — 1 वेळ
+- Boron 1g/L + Calcium Nitrate 3g/L""",
+
+    "fertilizer_tomato": """टोमॅटो खत वेळापत्रक:
+
+लागवड वेळी:
+- शेणखत: 5 टन प्रति एकर
+- DAP: 100 kg प्रति एकर
+- Potash: 75 kg प्रति एकर
+
+15 दिवसांनी:
+- Urea: 25 kg प्रति एकर
+
+30 दिवसांनी:
+- 13:40:13 खत: 5g/L फवारणी (फुलांसाठी)
+
+फळधारणा सुरू झाल्यावर:
+- Calcium Nitrate: 3g/L + Boron: 1g/L — फवारणी
+- फळे मजबूत होतात, तडे जात नाहीत
+
+पक्वता जवळ:
+- Potash: 50 kg प्रति एकर — गोडी वाढते""",
+
+    "seasonal_calendar": """Maharashtra पीक कॅलेंडर:
+
+खरीप (जून-ऑक्टोबर):
+- लावायची पिके: सोयाबीन, तूर, मका, कापूस, भेंडी, काकडी, दुधी, वांगे
+- जूनमध्ये: पाऊस सुरू झाल्यावर लागवड — सोयाबीन, तूर, मका उत्तम
+
+रब्बी (ऑक्टोबर-मार्च):
+- लावायची पिके: कांदा, टोमॅटो, गहू, हरभरा, ज्वारी
+- कांदा लागवड: ऑक्टोबर-नोव्हेंबर उत्तम
+- टोमॅटो: सप्टेंबर-ऑक्टोबर रोपे तयार करा
+
+उन्हाळी (फेब्रुवारी-मे):
+- कांदा, भेंडी, काकडी, टोमॅटो (पाणी असेल तर)
+
+जून मध्ये कांदा/टोमॅटो लागवड नाही — जुलै-ऑगस्टमध्ये रोपे तयार करा""",
+
+    "pest_control": """किडे नियंत्रण — सर्व पिके:
+
+फुलकिडे (Thrips) — चंदेरी पाने:
+- Fipronil (Regent): 1.5ml/L | पंपाला: 22ml
+
+मावा (Aphids) — पाने चिकट:
+- Imidacloprid (Confidor): 0.3ml/L | पंपाला: 4.5ml
+
+अळी (Caterpillar) — पाने/फळ खातो:
+- Emamectin (Proclaim): 0.4g/L | पंपाला: 6g — संध्याकाळी
+
+पांढरी माशी (Whitefly):
+- Imidacloprid (Confidor): 0.3ml/L | पंपाला: 4.5ml
+
+लाल कोळी (Red Mite) — पाने लाल/तपकिरी:
+- Abamectin (Vertimec): 0.5ml/L | पंपाला: 7.5ml
+
+फवारणी नियम:
+- सकाळी 7-9 किंवा संध्याकाळी 5-7
+- उन्हात फवारू नका — औषध जळते
+- 1 महिन्यात एकच औषध 2 वेळा — नंतर बदला""",
 
     "irrigation": """पाणी व्यवस्थापन:
-• कांदा: 7-10 दिवसांनी, काढणी 15 दिवस आधी बंद
-• टोमॅटो: 4-5 दिवसांनी, नियमित
-• उन्हाळ्यात: सकाळी लवकर
-• ठिबक: 60-70% पाणी वाचते""",
 
-    "government_schemes": """सरकारी योजना:
-• PM-KISAN: ₹6,000/वर्ष | pmkisan.gov.in | 155261
-• PMFBY पीक विमा: कांदा 2% premium | बँकेत अर्ज
-• KCC कर्ज: ₹3L, 4% व्याज | जवळची बँक
-• ठिबक अनुदान: 55-65% सूट | कृषी विभाग
-• माती आरोग्य कार्ड: मोफत | KVK: 020-25695081""",
+कांदा:
+- सुरुवातीला: 5-7 दिवसांनी
+- कांदा तयार होताना: 10-12 दिवसांनी
+- काढणी 15 दिवस आधी: पाणी बंद — कांदा टिकतो
+- जास्त पाणी दिले तर: कांदा कुजतो, मर रोग येतो
+
+टोमॅटो:
+- नियमित: 4-5 दिवसांनी
+- फळधारणेत: आणखी नियमित — अनियमित पाण्याने फळे तडकतात
+- उन्हाळ्यात: सकाळी लवकर द्या
+
+ठिबक सिंचन (Drip):
+- 60-70% पाणी वाचते
+- सरकारी अनुदान: 55-65% सूट मिळते — कृषी विभागात अर्ज""",
+
+    "government_schemes": """सरकारी योजना — Maharashtra:
+
+PM-KISAN:
+- फायदा: ₹6,000 वर्षाला (3 हप्त्यात)
+- वेबसाइट: pmkisan.gov.in
+- हेल्पलाइन: 155261
+
+PMFBY पीक विमा:
+- कांदा-टोमॅटो: शेतकऱ्याने फक्त 2% premium भरायचे
+- कुठे: जवळच्या बँकेत किंवा CSC सेंटरवर अर्ज
+
+KCC (किसान क्रेडिट कार्ड):
+- ₹3 लाखापर्यंत कर्ज, फक्त 4% व्याज
+- कुठे: SBI, Bank of Maharashtra, जिल्हा बँक
+
+ठिबक/तुषार अनुदान:
+- 55-65% सरकारी अनुदान
+- कुठे: जिल्हा कृषी विभाग कार्यालय
+
+माती आरोग्य कार्ड (Soil Health Card):
+- मोफत माती परीक्षण
+- KVK हेल्पलाइन: 020-25695081""",
 }
 
-SYSTEM = """तू KrishiMitra AI आहेस — भारतातील शेतकऱ्यांसाठी मराठी कृषी सहाय्यक.
+# ── System Prompt ──────────────────────────────────────────────────────────
+SYSTEM = """तू KrishiMitra आहेस — Maharashtra च्या शेतकऱ्यांचा विश्वासू मित्र आणि कृषी सल्लागार.
 
-ध्येय: साध्या, practical आणि शेतकरी-मित्र मराठीत मार्गदर्शन करणे.
+## तुझी भाषा शैली:
+- शेतकरी formal नावे वापरत नाहीत — तूही वापरू नकोस
+  ❌ "Purple Blotch fungal infection"
+  ✅ "कांद्याच्या पानावर जांभळे डाग पडतायत — हे करपा आहे"
+- औषधाचे brand name नेहमी सांग जे दुकानात मिळते
+  ✅ "Mancozeb — हे Dithane M-45 नावाने मिळते"
+- doses नेहमी 15 लिटर पंपाच्या प्रमाणात सांग
+  ✅ "15 लिटर पंपाला 30 ग्रॅम"
+- एकर मध्ये सांग, hectare नाही
 
-महत्त्वाचे:
-- कधीही facts, pesticide doses, fertilizer recommendations शोधून काढू नकोस
-- नक्की माहित नाही → follow-up विचार किंवा "कृषी सेवकाला विचारा" सांग
-- "As an AI" किंवा "language model" असे कधीही बोलू नकोस
+## व्यक्तिमत्व:
+- जवळच्या अनुभवी काकांसारखे बोल — formal नाही
+- Direct, practical, action-oriented
+- कधीही "As an AI" असे म्हणू नकोस
 
-भाषा:
-- नेहमी मराठीत उत्तर दे
-- साधी शेतकरी-मित्र भाषा
-- Bullet points वापर
-- Robot सारखे बोलू नकोस
-- Technical jargon टाळ
-
-व्यक्तिमत्व:
-- मित्रत्वाचे, आदरयुक्त, practical, direct
-- अनुभवी कृषी सल्लागारासारखे बोल
-
-रोग प्रश्न — आधी विचार:
+## रोग/समस्या विचारताना — आधी हे विचार (एकाच वेळी एकच प्रश्न):
 - कोणते पीक?
-- कोणती लक्षणे?
-- पाने/फळ/खोड कुठे?
+- पान/खोड/फळ/मूळ — कुठे समस्या?
+- रंग काय आहे — पिवळे/काळे/तपकिरी/पांढरे?
 - किती दिवसांपासून?
 - फोटो आहे का?
 
-रोग उत्तर format:
-🔍 संभाव्य समस्या
-📌 दिसणारी लक्षणे
-✅ काय करावे
-⚠️ काळजी
+## उत्तर format:
 
-फोटो format:
-📸 फोटो विश्लेषण
-संभाव्य समस्या:
-विश्वास: उच्च/मध्यम/कमी
-✅ पुढील उपाय
-
-हवामान format:
-🌦️ हवामान माहिती
-🚜 शेतकरी सल्ला
-
-मंडई format:
-📈 बाजारभाव
-पीक: | बाजार:
-💡 सूचना
-
-खत format — आधी समजून घे:
-- पीक कोणते?
-- Stage काय?
-- लक्षणे काय?
-नंतर:
-🌱 समस्या
-✅ संभाव्य उपाय
-⚠️ काळजी
-
-किडे format:
-🐛 संभाव्य कीड
+रोग असेल तर:
+🔍 समस्या काय आहे
 📌 लक्षणे
-✅ नियंत्रण उपाय
-⚠️ सूचना
+✅ उपाय — exact dose सहित (15L पंपाचे प्रमाण)
+⚠️ काळजी
 
-Safety:
+खत असेल तर:
+🌱 कोणते खत द्यायचे
+📌 किती द्यायचे (एकर + 15L पंप)
+⚠️ काळजी
+
+## Safety:
 - "हे औषध नक्की काम करेल" असे कधीही नाही
-- "याचा फायदा होऊ शकतो" असे सांग
-- नक्की माहित नाही → "माझ्याकडे सध्या पुरेशी माहिती नाही"
+- "हे फायदेशीर ठरू शकते" असे सांग
+- माहिती नाही → "जवळच्या कृषी केंद्राला विचारा किंवा 1800-180-1551 वर call करा"
 
-Supported crops: Tomato, Onion, Potato, Brinjal, Chilli, Okra, Cabbage, Cauliflower, Cotton, Soybean, Sugarcane, Rice, Wheat, Maize, Tur, Gram, Grapes, Pomegranate, Banana, Mango, Orange आणि इतर सर्व
+## भाषा:
+- नेहमी मराठीत उत्तर दे
+- साध्या शब्दात — शेतकऱ्याला समजेल असे
+- Bullet points वापर, paragraphs नको
 
-प्रत्येक उत्तर:
-✔ मराठी ✔ Short ✔ Practical ✔ Easy ✔ Action-oriented
+शेतकऱ्याला वाटले पाहिजे की तो एका अनुभवी, जवळच्या माणसाशी बोलतोय."""
 
-शेतकऱ्याला वाटले पाहिजे की तो एका अनुभवी कृषी सल्लागाराशी बोलत आहे."""
+# ── Intent Detection Keywords ──────────────────────────────────────────────
+DISEASE_WORDS = [
+    "rog", "dag", "blight", "fungus", "karpa", "kida", "pest", "disease",
+    "kirda", "piwla", "black", "pivla", "ali", "insect", "spray",
+    "मरतंय", "सुकतंय", "वाकडं", "काळं", "तपकिरी", "गळतंय", "कुजतंय",
+    "पिवळं", "पांढरं", "डाग", "छिद्र", "अळी", "किडा", "बुरशी",
+    "marat", "sukhat", "vakat", "kharab", "chidra", "pivla",
+    "galat", "kujat", "pane", "pale", "yellow", "white", "brown",
+    "problem", "trouble", "kahi", "nahi", "hotat", "zalay"
+]
+
+FERTILIZER_WORDS = [
+    "khad", "khata", "khate", "fertilizer", "urea", "npk", "poshan",
+    "dap", "potash", "zinc", "boron", "nutrients", "khaychi",
+    "वाढत", "लहान", "खत", "पोषण", "खुजा",
+    "vadhat", "lahan", "khuja", "grow", "growth"
+]
+
+WATER_WORDS = [
+    "pani", "paani", "irrigation", "thipak", "drip", "पाणी", "ओलावा",
+    "olava", "sukka", "कोरडं", "korda"
+]
+
+SEASON_WORDS = [
+    "june", "july", "august", "kharif", "rabi", "season", "konat",
+    "konti", "ghyav", "lagvad", "pik", "लागवड", "पेरणी", "कधी",
+    "lavaycha", "perni", "kadhi", "vegali", "vegala", "yogy"
+]
+
+SCHEME_WORDS = [
+    "yojana", "scheme", "sarkar", "vima", "kisan", "subsidy",
+    "loan", "karj", "paise", "anudaan", "योजना", "अनुदान", "विमा",
+    "सरकार", "पैसे", "कर्ज"
+]
 
 def _get_context(question: str, farmer: dict) -> str:
     q = question.lower()
     crops = str(farmer.get("crops", [])).lower()
     parts = []
 
-    if any(w in q for w in ["rog","dag","piwla","kirda","disease","blight","fungus","karpa","kida","pest","ali","black","pivla"]):
-        if any(c in crops for c in ["onion","kanda"]): parts.append(KNOWLEDGE["onion_disease"])
-        if any(c in crops for c in ["tomato","tamatar"]): parts.append(KNOWLEDGE["tomato_disease"])
+    if any(w in q for w in DISEASE_WORDS):
+        if any(c in crops for c in ["onion", "kanda", "kandaa"]):
+            parts.append(KNOWLEDGE["onion_disease"])
+        if any(c in crops for c in ["tomato", "tamatar", "tomatar"]):
+            parts.append(KNOWLEDGE["tomato_disease"])
         parts.append(KNOWLEDGE["pest_control"])
 
-    if any(w in q for w in ["khata","khate","fertilizer","urea","npk","poshan","khad"]):
-        if any(c in crops for c in ["onion","kanda"]): parts.append(KNOWLEDGE["fertilizer_onion"])
-        if any(c in crops for c in ["tomato","tamatar"]): parts.append(KNOWLEDGE["fertilizer_tomato"])
+    if any(w in q for w in FERTILIZER_WORDS):
+        if any(c in crops for c in ["onion", "kanda"]):
+            parts.append(KNOWLEDGE["fertilizer_onion"])
+        if any(c in crops for c in ["tomato", "tamatar"]):
+            parts.append(KNOWLEDGE["fertilizer_tomato"])
 
-    if any(w in q for w in ["june","july","kharif","rabi","season","konat","konti","ghyav","lagvad","pik"]):
+    if any(w in q for w in SEASON_WORDS):
         parts.append(KNOWLEDGE["seasonal_calendar"])
 
-    if any(w in q for w in ["pani","irrigation","thipak","paani"]):
+    if any(w in q for w in WATER_WORDS):
         parts.append(KNOWLEDGE["irrigation"])
 
-    if any(w in q for w in ["yojana","scheme","sarkar","vima","kisan","subsidy","loan","karj"]):
+    if any(w in q for w in SCHEME_WORDS):
         parts.append(KNOWLEDGE["government_schemes"])
+
+    # Default fallback — always give crop context
+    if not parts:
+        if any(c in crops for c in ["onion", "kanda"]):
+            parts.append(KNOWLEDGE["onion_disease"])
+            parts.append(KNOWLEDGE["fertilizer_onion"])
+        if any(c in crops for c in ["tomato", "tamatar"]):
+            parts.append(KNOWLEDGE["tomato_disease"])
+            parts.append(KNOWLEDGE["fertilizer_tomato"])
 
     return "\n\n".join(parts)
 
-async def _cerebras_call(messages: list, max_tokens: int = 500) -> str:
+# ── API Calls ──────────────────────────────────────────────────────────────
+async def _cerebras_call(messages: list, max_tokens: int = 600) -> str:
     if not CEREBRAS_API_KEY: return ""
     try:
-        async with httpx.AsyncClient(timeout=25) as c:
+        async with httpx.AsyncClient(timeout=30) as c:
             r = await c.post(
                 CEREBRAS_URL,
                 headers={"Authorization": f"Bearer {CEREBRAS_API_KEY}", "Content-Type": "application/json"},
-                json={"model": CEREBRAS_MODEL, "messages": messages, "max_tokens": max_tokens, "temperature": 0.2}
+                json={"model": CEREBRAS_MODEL, "messages": messages, "max_tokens": max_tokens, "temperature": 0.15}
             )
             if r.status_code == 200:
                 return r.json()["choices"][0]["message"]["content"].strip()
@@ -184,14 +330,14 @@ async def _cerebras_call(messages: list, max_tokens: int = 500) -> str:
         log.error(f"Cerebras failed: {e}")
         return ""
 
-async def _groq_call(messages: list, max_tokens: int = 500) -> str:
+async def _groq_call(messages: list, max_tokens: int = 600) -> str:
     if not GROQ_API_KEY: return ""
     try:
-        async with httpx.AsyncClient(timeout=25) as c:
+        async with httpx.AsyncClient(timeout=30) as c:
             r = await c.post(
                 GROQ_URL,
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-                json={"model": GROQ_MODEL, "messages": messages, "max_tokens": max_tokens, "temperature": 0.2}
+                json={"model": GROQ_MODEL, "messages": messages, "max_tokens": max_tokens, "temperature": 0.15}
             )
             if r.status_code == 200:
                 return r.json()["choices"][0]["message"]["content"].strip()
@@ -213,22 +359,22 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
         messages = [{"role": "system", "content": SYSTEM}]
 
         if history:
-            for h in history[-3:]:
+            for h in history[-6:]:
                 if h.get("user_message") and h["user_message"] not in ["[IMAGE]", "[VOICE]"]:
                     messages.append({"role": "user", "content": h["user_message"]})
                 if h.get("bot_response"):
                     messages.append({"role": "assistant", "content": h["bot_response"]})
 
-        user_content = f"शेतकरी: {city}, {district}, Maharashtra | पिके: {crops}"
+        user_content = f"शेतकरी: {city}, {district} | पिके: {crops}"
         if context:
-            user_content += f"\n\nसंदर्भ:\n{context}"
+            user_content += f"\n\nसंदर्भ माहिती:\n{context}"
         user_content += f"\n\nप्रश्न: {question}"
         messages.append({"role": "user", "content": user_content})
 
-        ans = await _cerebras_call(messages, 500)
+        ans = await _cerebras_call(messages, 600)
         if not ans:
             log.warning("Cerebras failed → Groq fallback")
-            ans = await _groq_call(messages, 500)
+            ans = await _groq_call(messages, 600)
         if not ans:
             return "❌ थोडी अडचण आली. पुन्हा विचारा. 🙏"
 
@@ -261,39 +407,47 @@ async def disease_detect(image_bytes: bytes, caption: str, farmer: dict) -> str:
                 json={
                     "model": "llama-3.2-11b-vision-preview",
                     "messages": [{"role": "user", "content": [
-                        {"type": "text", "text": f"""तू KrishiMitra AI आहेस — अनुभवी कृषी रोग निदान expert.
+                        {"type": "text", "text": f"""तू KrishiMitra आहेस — अनुभवी कृषी रोग तज्ञ.
 
 संदर्भ:
 {context}
 
-फोटो पाहून मराठीत सांग:
+फोटो नीट बघ आणि मराठीत सांग:
 
 📸 फोटो विश्लेषण
 
-संभाव्य समस्या:
+संभाव्य समस्या: [नाव सांग]
 विश्वास: उच्च / मध्यम / कमी
-📌 दिसणारी लक्षणे:
-✅ पुढील उपाय — exact dosage सहित
-⚠️ काळजी:
 
-शेतकरी {crops} घेतो. {f'टीप: {caption}' if caption else ''}
-Context वापर — guess करू नकोस. नक्की नाही → "अधिक स्पष्ट फोटो पाठवा" सांग."""},
+📌 दिसणारी लक्षणे:
+- [काय दिसतं ते सांग]
+
+✅ पुढील उपाय:
+- औषध: [brand name सहित]
+- dose: 15 लिटर पंपाला [किती]
+- कधी फवारायचे: [वेळ]
+
+⚠️ काळजी:
+- [महत्त्वाची सूचना]
+
+शेतकरी {crops} घेतो. {f'शेतकरी म्हणतो: {caption}' if caption else ''}
+फोटो नीट दिसत नसेल → "अधिक जवळून, प्रकाशात फोटो पाठवा" सांग."""},
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
                     ]}],
-                    "max_tokens": 400,
+                    "max_tokens": 500,
                     "temperature": 0.1
                 }
             )
         if r.status_code == 200:
             d = r.json()["choices"][0]["message"]["content"].strip()
-            return f"{d}\n\n📞 _1800-180-1551 (मोफत)_"
+            return f"{d}\n\n📞 _कृषी हेल्पलाइन: 1800-180-1551 (मोफत)_"
         return "❌ फोटो तपासता आला नाही. स्वच्छ फोटो पाठवा. 🙏"
     except Exception as e:
         log.error(f"disease_detect: {e}")
         return "❌ फोटो तपासता आला नाही. स्वच्छ फोटो पाठवा. 🙏"
 
 async def scheme_info(query: str) -> str:
-    return await farming_answer(query, {"crops": ["onion","tomato"], "city":"Pune", "district":"Pune"})
+    return await farming_answer(query, {"crops": ["onion", "tomato"], "city": "Pune", "district": "Pune"})
 
 async def voice_to_text(audio_bytes: bytes) -> str:
     if not GROQ_API_KEY or not audio_bytes: return ""
