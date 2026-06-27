@@ -16,7 +16,7 @@ class ApproveReq(BaseModel):
     name: str = "Farmer"
     district: str = "Pune"
     city: str = "Pune"
-    crops: List[str] = ["onion","tomato"]
+    crops: List[str] = []
     lat: float = 18.5204
     lon: float = 73.8567
     is_free: bool = False
