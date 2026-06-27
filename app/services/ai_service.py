@@ -1,6 +1,6 @@
 import logging
 import httpx
-from app.config import GROQ_API_KEY, CEREBRAS_API_KEY
+from app.config import GROQ_API_KEY, CEREBRAS_API_KEY, TAVILY_API_KEY
 
 log = logging.getLogger(__name__)
 
@@ -307,7 +307,13 @@ Farmer ने पीक सांगितलं नसेल तर आधी �
 - नेहमी मराठीत उत्तर दे, साध्या शब्दात
 - Bullet points वापर, paragraphs नको
 
-शेतकऱ्याला वाटले पाहिजे की तो एका अनुभवी, जवळच्या माणसाशी बोलतोय."""
+शेतकऱ्याला वाटले पाहिजे की तो एका अनुभवी, जवळच्या माणसाशी बोलतोय.
+
+## इंटरनेट माहिती असेल तर:
+- इंटरनेट माहिती: label असलेली माहिती वापर
+- Latest/verified information म्हणून treat कर
+- Brand names आणि doses confirm कर
+- जर internet माहिती आणि KNOWLEDGE dict conflict करत असेल → KNOWLEDGE dict ला priority दे"""
 
 # ── Intent Detection Keywords ──────────────────────────────────────────────
 DISEASE_WORDS = [
@@ -456,14 +462,70 @@ async def _groq_call(messages: list, max_tokens: int = 600) -> str:
         log.error(f"Groq failed: {e}")
         return ""
 
+# ── Tavily Web Search (fallback when KNOWLEDGE dict has no answer) ─────────
+_WEB_SEARCH_TRIGGER_WORDS = [
+    "नवीन", "latest", "2024", "2025", "2026", "नुकताच", "आत्ता",
+    "new", "recent", "current", "ताजे", "अद्ययावत"
+]
+
+async def _tavily_search(query: str) -> str:
+    """Tavily web search — फक्त KNOWLEDGE dict madhe answer nasel tevhach call hoto"""
+    if not TAVILY_API_KEY:
+        return ""
+    try:
+        from tavily import TavilyClient
+        client = TavilyClient(api_key=TAVILY_API_KEY)
+        search_query = f"{query} उपाय Maharashtra शेती मराठी"
+        result = client.search(
+            query=search_query,
+            search_depth="advanced",
+            max_results=3
+        )
+        items = result.get("results", [])
+        if not items:
+            return ""
+        combined = "\n\n".join([
+            f"{item.get('title', '')}: {item.get('content', '')[:300]}"
+            for item in items[:3]
+        ])
+        log.info(f"Tavily search success: {search_query[:50]}")
+        return combined
+    except Exception as e:
+        log.error(f"Tavily search failed: {e}")
+        return ""
+
+async def _needs_web_search(question: str, context: str) -> bool:
+    """KNOWLEDGE dict madhe answer nasel tarच web search karaycha — quota vachvaycha"""
+    if not context or not context.strip():
+        return True
+    q_lower = question.lower()
+    if any(w in q_lower for w in _WEB_SEARCH_TRIGGER_WORDS):
+        return True
+    return False
+
+def _build_tavily_query(question: str, farmer_crops: list) -> str:
+    """Smart query banav — crop + problem + Maharashtra"""
+    crops_str = " ".join(farmer_crops) if farmer_crops else ""
+    if crops_str:
+        return f"{crops_str} {question}"
+    return question
+
 async def farming_answer(question: str, farmer: dict, history: list = None) -> str:
     if not CEREBRAS_API_KEY and not GROQ_API_KEY:
         return "❌ सेवा सध्या उपलब्ध नाही. थोड्या वेळाने विचारा. 🙏"
     try:
-        crops = ", ".join(farmer.get("crops", [])) or "सांगितले नाही"
+        farmer_crops = farmer.get("crops", [])
+        crops = ", ".join(farmer_crops) or "सांगितले नाही"
         city = farmer.get("city", "Pune")
         district = farmer.get("district", "Pune")
         context = _get_context(question, farmer)
+
+        # Tavily web search — फक्त KNOWLEDGE dict madhe answer nasel tarच (max 1 call/message)
+        if TAVILY_API_KEY and await _needs_web_search(question, context):
+            tavily_query = _build_tavily_query(question, farmer_crops)
+            web_info = await _tavily_search(tavily_query)
+            if web_info:
+                context = (context + f"\n\nइंटरनेट माहिती:\n{web_info}").strip()
 
         messages = [{"role": "system", "content": SYSTEM}]
 
