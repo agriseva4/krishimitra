@@ -40,7 +40,7 @@ async def create_farmer(phone: str):
             "phone": phone, "is_approved": False, "is_free": False,
             "is_blocked": False, "district": "", "city": "",
             "lat": 18.5204, "lon": 73.8567,
-            "crops": ["onion", "tomato"], "language": "mr",
+            "crops": [], "language": "mr",
             "location_set": False
         }).execute()
         log.info(f"New farmer: {phone}")
