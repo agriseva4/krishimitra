@@ -63,6 +63,20 @@ async def update_farmer_location(phone: str, district: str, info: dict):
     except Exception as e:
         log.error(f"update_farmer_location: {e}")
 
+async def update_farmer_crops(phone: str, crops: list):
+    """Naveen pikache naव message madhe sapadल्यावर farmer.crops update kar"""
+    try:
+        db = get_db()
+        if not db: return
+        # Duplicate kadhun TaK, max 10 crops save kar (table bloat टाळण्यासाठी)
+        unique_crops = list(dict.fromkeys(crops))[:10]
+        db.table("farmers").update({
+            "crops": unique_crops
+        }).eq("phone", phone).execute()
+        log.info(f"Crops updated: {phone} → {unique_crops}")
+    except Exception as e:
+        log.error(f"update_farmer_crops: {e}")
+
 async def get_all_farmers() -> list:
     try:
         db = get_db()
