@@ -6,7 +6,7 @@ log = logging.getLogger(__name__)
 
 GROQ_URL       = "https://api.groq.com/openai/v1/chat/completions"
 CEREBRAS_URL   = "https://api.cerebras.ai/v1/chat/completions"
-GROQ_MODEL     = "llama-3.3-70b-versatile"
+GROQ_MODEL     = "qwen/qwen3-32b"
 CEREBRAS_MODEL = "llama3.1-8b"
 
 # ── Knowledge Base — सर्व प्रमुख पिके ───────────────────────────────────────
@@ -526,7 +526,7 @@ async def _groq_call(messages: list, max_tokens: int = 600) -> str:
             r = await c.post(
                 GROQ_URL,
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-                json={"model": GROQ_MODEL, "messages": messages, "max_tokens": max_tokens, "temperature": 0.15}
+                json={"model": GROQ_MODEL, "messages": messages, "max_tokens": max_tokens, "temperature": 0.15, "reasoning_effort": "none"}
             )
             if r.status_code == 200:
                 return r.json()["choices"][0]["message"]["content"].strip()
@@ -688,7 +688,7 @@ async def disease_detect(image_bytes: bytes, caption: str, farmer: dict) -> str:
                 GROQ_URL,
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
                 json={
-                    "model": "llama-3.2-11b-vision-preview",
+                    "model": "meta-llama/llama-4-scout-17b-16e-instruct",
                     "messages": [{"role": "user", "content": [
                         {"type": "text", "text": f"""तू KrishiMitra आहेस — अनुभवी कृषी रोग तज्ञ.
 
