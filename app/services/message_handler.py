@@ -75,9 +75,15 @@ DISTRICT_KEYWORDS = {
 
 def _detect_district(text: str) -> str:
     t = text.lower().strip()
+    # Pahile: exact number/word match (e.g. "10" != "1" cha substring)
     for district, keywords in DISTRICT_KEYWORDS.items():
-        if any(k in t for k in keywords):
+        if t in keywords:
             return district
+    # Fallback: partial/word match sirf non-numeric keywords sathi (names)
+    for district, keywords in DISTRICT_KEYWORDS.items():
+        for k in keywords:
+            if not k.isdigit() and k in t:
+                return district
     return ""
 
 WEATHER_WORDS = [
