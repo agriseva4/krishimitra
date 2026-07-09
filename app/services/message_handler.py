@@ -1,4 +1,6 @@
 import logging
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from app.services.database import get_farmer, create_farmer, log_conv, get_last_messages, update_farmer_location, update_farmer_crops
 from app.services.ai_service import farming_answer, disease_detect, voice_to_text, CROP_KEYWORDS
 from app.services.weather import get_weather
@@ -85,6 +87,11 @@ def _detect_district(text: str) -> str:
             if not k.isdigit() and k in t:
                 return district
     return ""
+
+DATE_WORDS = [
+    "tarikh", "tarikh kay", "आजची तारीख", "तारीख", "date today",
+    "today's date", "what date", "kay tarikh", "aajchi tarikh"
+]
 
 WEATHER_WORDS = [
     "weather", "havaman", "hawaman", "hava", "हवामान", "पाऊस", "paus", "rain",
@@ -175,6 +182,12 @@ async def _text(phone: str, text: str, farmer: dict) -> str:
 
     if t in ["hi", "hello", "hey", "helo", "hii", "नमस्कार", "namaskar", "hy", "hye", "start"]:
         return WELCOME
+
+    if any(w in t for w in DATE_WORDS):
+        months_mr = ["", "जानेवारी", "फेब्रुवारी", "मार्च", "एप्रिल", "मे", "जून",
+                     "जुलै", "ऑगस्ट", "सप्टेंबर", "ऑक्टोबर", "नोव्हेंबर", "डिसेंबर"]
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+        return f"📅 आजची तारीख: *{now.day} {months_mr[now.month]} {now.year}*"
 
     if any(w in t for w in WEATHER_WORDS):
         return await get_weather(
