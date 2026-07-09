@@ -87,7 +87,7 @@ def _detect_district(text: str) -> str:
     return ""
 
 WEATHER_WORDS = [
-    "weather", "havaman", "हवामान", "पाऊस", "paus", "rain",
+    "weather", "havaman", "hawaman", "hava", "हवामान", "पाऊस", "paus", "rain",
     "ऊन", "thand", "थंडी", "temp", "temperature", "उद्या",
     "उन्हाळा", "garmi", "थंड", "warm", "cold", "forecast"
 ]
