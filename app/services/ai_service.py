@@ -622,6 +622,17 @@ def _get_context(question: str, farmer: dict, history: list = None) -> tuple:
     return "\n\n".join(parts), specific_found, unmapped
 
 # ── API Calls ──────────────────────────────────────────────────────────────
+import re
+
+def _clean_llm_output(text: str) -> str:
+    """gpt-oss (Harmony format) chya kadhi-kadhi chukun leak hoणाऱ्या internal control
+    tokens (<|start|>, <|channel|>, <|return|> वगैरे) काढून टाकतो — high reasoning_effort
+    वापरताना हा risk जरा वाढतो, त्यामुळे farmer ला कधीच tuटलेलं/raw output दिसू नये यासाठी safety net."""
+    if not text:
+        return text
+    text = re.sub(r"<\|[a-zA-Z_]+\|>", "", text)
+    return text.strip()
+
 async def _cerebras_call(messages: list, max_tokens: int = 600) -> str:
     if not CEREBRAS_API_KEY: return ""
     try:
@@ -629,10 +640,11 @@ async def _cerebras_call(messages: list, max_tokens: int = 600) -> str:
             r = await c.post(
                 CEREBRAS_URL,
                 headers={"Authorization": f"Bearer {CEREBRAS_API_KEY}", "Content-Type": "application/json"},
-                json={"model": CEREBRAS_MODEL, "messages": messages, "max_tokens": max_tokens, "temperature": 0.4}
+                json={"model": CEREBRAS_MODEL, "messages": messages, "max_tokens": max_tokens,
+                      "temperature": 0.4, "reasoning_effort": "medium"}
             )
             if r.status_code == 200:
-                return r.json()["choices"][0]["message"]["content"].strip()
+                return _clean_llm_output(r.json()["choices"][0]["message"]["content"])
             log.error(f"Cerebras: {r.status_code} {r.text[:100]}")
             return ""
     except Exception as e:
@@ -646,10 +658,11 @@ async def _groq_call(messages: list, max_tokens: int = 600) -> str:
             r = await c.post(
                 GROQ_URL,
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-                json={"model": GROQ_MODEL, "messages": messages, "max_tokens": max_tokens, "temperature": 0.4, "reasoning_effort": "medium"}
+                json={"model": GROQ_MODEL, "messages": messages, "max_tokens": max_tokens,
+                      "temperature": 0.4, "reasoning_effort": "medium", "include_reasoning": False}
             )
             if r.status_code == 200:
-                return r.json()["choices"][0]["message"]["content"].strip()
+                return _clean_llm_output(r.json()["choices"][0]["message"]["content"])
             log.error(f"Groq: {r.status_code}")
             return ""
     except Exception as e:
@@ -662,17 +675,32 @@ _WEB_SEARCH_TRIGGER_WORDS = [
     "new", "recent", "current", "ताजे", "अद्ययावत"
 ]
 
+# Tavily results cache — same crop/topic combo boarबार search करायची गरज नाही (in-memory,
+# server restart झाला की रिकामा होतो — पण अजूनही मोठ्या प्रमाणात duplicate searches वाचतात,
+# कारण बरेच शेतकरी सिझनल/सारख्याच समस्यांबद्दल विचारतात).
+_tavily_cache: dict = {}
+_TAVILY_CACHE_TTL = 43200  # 12 तास (सेकंदात)
+
 async def _tavily_search(query: str) -> str:
-    """Tavily web search — फक्त KNOWLEDGE dict madhe answer nasel tevhach call hoto"""
+    """Tavily web search — फक्त KNOWLEDGE dict madhe answer nasel tevhach call hoto.
+    टीप: search_depth='basic' वापरतो (1 credit) 'advanced' (2 credits) ऐवजी — free tier
+    (1000 credits/month) दुप्पट काळ टिकतो. + 12-तास cache मुळे same query परत परत
+    charge होत नाही."""
     if not TAVILY_API_KEY:
         return ""
+    import time
+    cache_key = query.strip().lower()
+    cached = _tavily_cache.get(cache_key)
+    if cached and (time.time() - cached[0]) < _TAVILY_CACHE_TTL:
+        log.info(f"Tavily cache hit: {cache_key[:50]}")
+        return cached[1]
     try:
         from tavily import TavilyClient
         client = TavilyClient(api_key=TAVILY_API_KEY)
         search_query = f"{query} उपाय Maharashtra शेती मराठी"
         result = client.search(
             query=search_query,
-            search_depth="advanced",
+            search_depth="basic",
             max_results=3
         )
         items = result.get("results", [])
@@ -683,6 +711,12 @@ async def _tavily_search(query: str) -> str:
             for item in items[:3]
         ])
         log.info(f"Tavily search success: {search_query[:50]}")
+        _tavily_cache[cache_key] = (time.time(), combined)
+        # Cache जास्त मोठा होऊ नये म्हणून जुनी entries साफ कर
+        if len(_tavily_cache) > 500:
+            oldest = sorted(_tavily_cache.items(), key=lambda x: x[1][0])[:100]
+            for k, _ in oldest:
+                _tavily_cache.pop(k, None)
         return combined
     except Exception as e:
         log.error(f"Tavily search failed: {e}")
@@ -745,12 +779,17 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
 
         messages = [{"role": "system", "content": SYSTEM}]
 
+        # टीप: history madhle june bot-answers kadhi kadhi lambe astat (250+ shabda).
+        # ते जसेच्या तसे परत पाठवले तर context खूप मोठा होतो — free-tier token
+        # quota (Cerebras/Groq) वर अनावश्यक ताण पडतो. म्हणून प्रत्येक जुना संदेश थोडक्यात कापतो —
+        # crop/topic ओळखण्यासाठी हे पुरेसं आहे, पूर्ण जुनं उत्तर परत पाठवायची गरज नाही.
+        _HISTORY_CHAR_CAP = 280
         if history:
-            for h in history[-6:]:
+            for h in history[-5:]:
                 if h.get("user_message") and h["user_message"] not in ["[IMAGE]", "[VOICE]"]:
-                    messages.append({"role": "user", "content": h["user_message"]})
+                    messages.append({"role": "user", "content": h["user_message"][:_HISTORY_CHAR_CAP]})
                 if h.get("bot_response"):
-                    messages.append({"role": "assistant", "content": h["bot_response"]})
+                    messages.append({"role": "assistant", "content": h["bot_response"][:_HISTORY_CHAR_CAP]})
 
         user_content = f"शेतकरी: {city}, {district} | पिके: {crops}"
         if context:
@@ -772,10 +811,13 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
 
         messages.append({"role": "user", "content": user_content})
 
-        ans = await _cerebras_call(messages, 350)
+        # टीप: max_tokens आधी 350 होते — किंचित वाढवलं (500) कारण medium reasoning_effort
+        # ला काही hidden thinking tokens लागतात, पण free-tier quota (Groq: 8K tokens/minute)
+        # वाचवण्यासाठी 700 पर्यंत नेलं नाही — 500 हे संतुलन आहे.
+        ans = await _cerebras_call(messages, 500)
         if not ans:
             log.warning("Cerebras failed → Groq fallback")
-            ans = await _groq_call(messages, 350)
+            ans = await _groq_call(messages, 500)
         if not ans:
             return "❌ थोडी अडचण आली. पुन्हा विचारा. 🙏"
 
