@@ -47,7 +47,20 @@ async def _process(phone, msg, mtype):
         ack = ack_map.get(mtype, "🌾 *प्रश्न मिळाला!*\nउत्तर तयार करतो... थोडा वेळ थांबा ⏳")
         await send_message(phone, ack)
         resp = await handle(phone, msg, mtype)
-        if resp: await send_message(phone, resp)
+        if resp:
+            await send_message(phone, resp)
+            # Farmer ने VOICE ने विचारलं होतं तर उत्तर सुद्धा voice madhe pathaव —
+            # tyala vachaता yet nasel tar hे khूप उपयोगी. Best-effort — TTS fail zala
+            # tarी text answer aधीच gela aahe, so farmer कधीच रिकाम्या हाताने राहत नाही.
+            if mtype in ("audio", "voice"):
+                try:
+                    from app.services.tts import text_to_speech
+                    from app.services.whatsapp import send_audio_message
+                    audio_bytes = await text_to_speech(resp)
+                    if audio_bytes:
+                        await send_audio_message(phone, audio_bytes)
+                except Exception as e:
+                    log.warning(f"Voice reply skipped {phone}: {e}")
     except Exception as e:
         log.error(f"Process {phone}: {e}")
         try:
