@@ -118,15 +118,20 @@ CROP_EMOJI = {
     "Bottle Gourd":"🌿","Ridge Gourd":"🌿","Bitter Gourd":"🌿",
 }
 
-async def get_mandi_prices(district: str = "Pune", crop: str = None) -> str:
+async def get_mandi_prices(district: str = "Pune", crop: str = None, crops: list = None) -> str:
     today = date.today().strftime("%d-%b-%Y")
-    crops = [CROP_MAP.get(crop.lower(), crop.capitalize())] if crop else ["Onion", "Tomato"]
+    if crops:
+        crop_names = list(dict.fromkeys([CROP_MAP.get(c.lower(), c.capitalize()) for c in crops]))
+    elif crop:
+        crop_names = [CROP_MAP.get(crop.lower(), crop.capitalize())]
+    else:
+        crop_names = ["Onion", "Tomato"]
     district_lower = district.lower()
     markets = DISTRICT_MARKETS.get(district_lower, [district])
     all_prices = []
 
     for market in markets:
-        for c in crops:
+        for c in crop_names:
             if DATA_GOV_API_KEY and DATA_GOV_API_KEY != "PASTE_HERE":
                 try:
                     prices = await _fetch_data_gov(c, district, market)
@@ -142,7 +147,7 @@ async def get_mandi_prices(district: str = "Pune", crop: str = None) -> str:
 
     if not all_prices:
         yday = (date.today() - timedelta(days=1)).strftime("%d-%b-%Y")
-        for c in crops:
+        for c in crop_names:
             try:
                 prices = await _fetch_agmarknet(c, district, yday)
                 all_prices.extend(prices)
@@ -150,7 +155,7 @@ async def get_mandi_prices(district: str = "Pune", crop: str = None) -> str:
 
     if not all_prices:
         from app.services.database import get_mandi_history
-        for c in crops:
+        for c in crop_names:
             hist = await get_mandi_history(c, district, 7)
             if hist:
                 all_prices.extend([{
@@ -257,13 +262,33 @@ async def get_trend(commodity: str, district: str = "Pune") -> str:
         pct = (change / first * 100) if first > 0 else 0
         arrow = "📈" if change > 0 else "📉" if change < 0 else "➡️"
         word = "वाढला" if change > 0 else "घटला" if change < 0 else "स्थिर"
-        return (f"📊 *{commodity} ७-दिवस Trend — {district}*\n\n"
+        return (f"📊 *{commodity} ७-दिवस कल — {district}*\n\n"
                 f"{arrow} भाव *{word}*: ₹{abs(change):.0f}/क्विंटल ({pct:.1f}%)\n"
                 f"• ७ दिवसांपूर्वी: ₹{first:.0f}\n• आज: ₹{last:.0f}\n\n"
-                f"_Source: KrishiMitra DB_")
+                f"_स्रोत: KrishiMitra DB_")
     except Exception as e:
         log.error(f"Trend: {e}")
-        return "📊 Trend calculate करता आला नाही."
+        return "📊 भावाचा कल काढता आला नाही."
+
+async def get_trend_line(commodity: str, district: str = "Pune") -> str:
+    """daily broadcast sathi — ek chhoti, ek-oli trend (7-din tulnet)"""
+    try:
+        from app.services.database import get_mandi_history
+        data = await get_mandi_history(commodity, district, 7)
+        if len(data) < 2:
+            return ""
+        prices = [d["modal_price"] for d in data]
+        first, last = prices[0], prices[-1]
+        change = last - first
+        pct = (change / first * 100) if first > 0 else 0
+        if abs(pct) < 1:
+            return f"➡️ {commodity}: भाव स्थिर आहे (गेल्या ७ दिवसांत)"
+        arrow = "📈" if change > 0 else "📉"
+        word = "वाढला" if change > 0 else "घटला"
+        return f"{arrow} {commodity}: ₹{abs(change):.0f} ने {word} (गेल्या ७ दिवसांत, {abs(pct):.0f}%)"
+    except Exception as e:
+        log.warning(f"Trend line: {e}")
+        return ""
 
 def _fmt(prices: list, date_str: str, district: str) -> str:
     lines = [f"📊 *{district} मंडई भाव — {date_str}*\n"]
@@ -273,20 +298,20 @@ def _fmt(prices: list, date_str: str, district: str) -> str:
         if key in seen: continue
         seen.add(key)
         emoji = CROP_EMOJI.get(p["commodity"], "🌾")
-        src = "✅ Live" if p.get("source") == "live" else "📦 Saved"
+        src = "✅ ताजे" if p.get("source") == "live" else "📦 जुने"
         lines.append(
             f"{emoji} *{p['commodity']}* — {p.get('market', district)}\n"
             f"   किमान: ₹{p.get('min_price',0):.0f} | कमाल: ₹{p.get('max_price',0):.0f} | "
-            f"*Modal: ₹{p.get('modal_price',0):.0f}*/क्विंटल {src}\n"
+            f"*मोडल भाव: ₹{p.get('modal_price',0):.0f}*/क्विंटल {src}\n"
         )
     lines.append("━━━━━━━━━━━━")
-    lines.append("_Source: data.gov.in / Agmarknet_")
+    lines.append("_स्रोत: data.gov.in / Agmarknet_")
     return "\n".join(lines)
 
 def _fallback(date_str: str, district: str) -> str:
     markets = DISTRICT_MARKETS.get(district.lower(), [district])
     return (f"📊 *{district} मंडई भाव — {date_str}*\n\n"
-            f"⚠️ Live data सध्या उपलब्ध नाही.\n\n"
+            f"⚠️ ताजी माहिती सध्या उपलब्ध नाही.\n\n"
             f"*{district} जवळच्या मंडया:* {', '.join(markets)}\n\n"
             f"*इथे तपासा:*\n"
             f"🌐 agmarknet.gov.in\n"
