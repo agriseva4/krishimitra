@@ -333,19 +333,23 @@ SYSTEM = """तू KrishiMitra आहेस — Maharashtra च्या शे�
 - Direct, practical, action-oriented
 - कधीही "As an AI" असे म्हणू नकोस
 
-## तू सर्व पिकांना समान महत्त्व देऊन मदत करतोस:
-भाजीपाला (कांदा, टोमॅटो, बटाटा, वांगी, मिरची, कोबी, भेंडी, काकडी इ.)
-धान्य/कडधान्ये (कापूस, सोयाबीन, गहू, तूर, मका, ऊस)
-फळे (द्राक्षे, डाळिंब, आंबा, केळी, संत्री)
-महत्त्वाचे: कोणत्याही एका पिकाला (कांदा/टोमॅटो किंवा इतर) जास्त प्राधान्य देऊ नकोस.
+## तू सर्व पिकांना समान महत्त्व देऊन मदत करतोस — फक्त कांदा/टोमॅटो नाही, कोणतंही पीक असो (आंबा, ज्वारी, हळद, संत्री, सफरचंद — सगळी पिकं सारखीच महत्त्वाची).
 Farmer नक्की कोणत्या पिकाबद्दल विचारतोय ते आधी ओळख — context मधून त्याच पिकाची माहिती वापर.
-Farmer ने पीक सांगितलं नसेल तर आधी विचार: "कोणत्या पिकाबद्दल बोलतोयस?" — स्वतःहून कांदा/टोमॅटो गृहीत धरू नकोस.
+
+## अत्यंत महत्त्वाचा नियम — आधीच्या संभाषणाचा (conversation history) आदर कर:
+- वरती दिलेल्या मागच्या संदेशांमध्ये (history) आधीच एखादं पीक/समस्या discuss झाली असेल, आणि farmer
+  आता "अजून काय उपाय करावे", "ते झालं नाही", "अजून सांग", "काय करू" असं generic follow-up विचारत असेल —
+  तर तो **त्याच आधीच्या पिकाबद्दलच** बोलतोय असं गृहीत धर. पुन्हा "कोणत्या पिकाला?" विचारू नकोस —
+  हे farmer ला irritate करतं आणि agent त्याचं बोलणं विसरतो असं वाटतं.
+- फक्त तेव्हाच पीक विचार जेव्हा — (अ) ही farmer ची पहिलीच query आहे (history रिकामी आहे), किंवा
+  (ब) farmer ने स्पष्टपणे नवीन/वेगळा विषय सुरू केलाय ज्याचा आधीच्या पिकाशी संबंध नाही
+- कधीही स्वतःहून कांदा/टोमॅटो गृहीत धरू नकोस — पीक अनिश्चित असेल आणि history मध्येही सापडत नसेल तरच विचार, आणि कुठलंही specific पीक उदाहरण म्हणून सुचवू नकोस
 
 ## जर एकाच वेळी 2-3 पिकांची नावं घेतली असतील (उदा. "कांदा आणि टोमॅटो दोन्हीबद्दल सांग"):
 - दोन्ही पिकांना एकत्र, generic उत्तर देऊ नकोस — हे गोंधळात टाकतं
 - प्रत्येक पिकासाठी वेगळं, स्पष्ट उत्तर दे — आधी पीक 1 चं उत्तर, मग पीक 2 चं उत्तर (वेगळे विभाग करून)
 - जर लक्षणं/समस्या कोणत्याही एका पिकासाठीच विचारली असेल (उदा. "कांद्याला करपा आहे का?") तर फक्त त्याच पिकाबद्दल बोल, दुसऱ्या पिकाची माहिती मिसळू नकोस
-- स्पष्ट नसेल तर विचार: "कोणत्या पिकाला नक्की समस्या आहे — कांदा की टोमॅटो?"
+- स्पष्ट नसेल तर विचार: "कोणत्या पिकाला नक्की समस्या आहे?" (कोणतंही specific पीक उदाहरण म्हणून देऊ नकोस)
 
 ## रोग/समस्या विचारताना — context मध्ये माहिती नसेल तर आधी हे विचार (एकाच वेळी एकच प्रश्न):
 - कोणते पीक? पान/खोड/फळ/मूळ — कुठे समस्या? रंग काय? किती दिवसांपासून? फोटो आहे का?
@@ -477,6 +481,13 @@ OTHER_CROPS = {
     "castor":      ["castor", "erandi", "एरंडी"],
     "sesame":      ["sesame", "til", "तीळ", "तिळ"],
     "flower":      ["marigold", "zendu", "झेंडू", "gulab", "गुलाब", "फुलशेती"],
+    "apple":       ["apple", "safarchand", "सफरचंद", "सफरचंदा"],
+    "strawberry":  ["strawberry", "स्ट्रॉबेरी"],
+    "fig":         ["fig", "anjeer", "अंजीर"],
+    "custard_apple": ["custard apple", "sitaphal", "सीताफळ"],
+    "lemon":       ["lemon", "limbu", "लिंबू"],
+    "drumstick":   ["drumstick", "shevga", "शेवगा"],
+    "gram":        ["moth", "matki", "मटकी"],
 }
 
 # CROP_KEYWORDS = combined — message_handler.py cha crop-save logic sathi vaparla jato
@@ -510,7 +521,21 @@ _FERT_MAP = {
     "sugarcane": "fertilizer_sugarcane",
 }
 
-def _get_context(question: str, farmer: dict) -> tuple:
+def _infer_crop_from_history(history: list) -> list:
+    """Current question madhe crop mention nasel (उदा. follow-up: 'ajun konte upay karave',
+    'te zala nahi') tar — sarvat अलीकडच्या 2-3 messages madhun konta pik discuss hot hota
+    te olakh. Hे khoop mahatvach — nahitar agent parat parat 'kontya pikala' vicharat rahto
+    ani farmer la vatta ki tyani adhi vicharlele agent la aathvatach nahi."""
+    if not history:
+        return []
+    for h in reversed(history[-3:]):  # सर्वात अलीकडचा turn आधी check कर
+        combined = f"{h.get('user_message','') or ''} {h.get('bot_response','') or ''}"
+        crops = _detect_crops(combined, [])
+        if crops:
+            return crops
+    return []
+
+def _get_context(question: str, farmer: dict, history: list = None) -> tuple:
     """Returns (context_str, specific_kb_found: bool, unmapped_crops: list)
     specific_kb_found=False means — active_crops OLakhle gele, pan KNOWLEDGE dict madhe
     tyanchi specific entry nahi (उदा. आंबा, ज्वारी) → asha veli web search FORCE karaycha
@@ -518,6 +543,11 @@ def _get_context(question: str, farmer: dict) -> tuple:
     q = question.lower()
     farmer_crops = farmer.get("crops", [])
     active_crops = _detect_crops(question, farmer_crops)
+    inferred_from_history = False
+    if not active_crops and history:
+        active_crops = _infer_crop_from_history(history)
+        if active_crops:
+            inferred_from_history = True
     parts = []
     specific_found = False
     unmapped = []
@@ -563,13 +593,15 @@ def _get_context(question: str, farmer: dict) -> tuple:
         specific_found = True
 
     # Default fallback — kahi intent match nahi zala tar farmer chya crops chi info de
-    if not parts:
+    # (उदा. "ajun konte upay karave" सारखा generic follow-up — DISEASE_WORDS madhe match
+    # navhte, tarihi history vaparun olakhlela crop cha disease KB ithe include karaycha)
+    if not parts or inferred_from_history:
         for crop in active_crops:
             d_key = _DISEASE_MAP.get(crop)
             f_key = _FERT_MAP.get(crop)
-            if d_key and KNOWLEDGE.get(d_key):
+            if d_key and KNOWLEDGE.get(d_key) and KNOWLEDGE[d_key] not in parts:
                 parts.append(KNOWLEDGE[d_key]); specific_found = True
-            if f_key and KNOWLEDGE.get(f_key):
+            if f_key and KNOWLEDGE.get(f_key) and KNOWLEDGE[f_key] not in parts:
                 parts.append(KNOWLEDGE[f_key]); specific_found = True
             if crop in OTHER_CROPS and crop not in unmapped:
                 unmapped.append(crop)
@@ -673,7 +705,21 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
         crops = ", ".join(farmer_crops) or "सांगितले नाही"
         city = farmer.get("city", "Pune")
         district = farmer.get("district", "Pune")
-        context, specific_found, unmapped_crops = _get_context(question, farmer)
+        context, specific_found, unmapped_crops = _get_context(question, farmer, history)
+
+        # Follow-up question आहे का — म्हणजे current message madhe crop mention nasla,
+        # pan history madhun tो olakhla gela. Asel tar model la explicit sanga, nahitar
+        # tо parat "kontya pikala?" vicharat rahil (jari history var vishayacha context asel tari).
+        current_msg_crops = _detect_crops(question, [])
+        inferred_crop_note = ""
+        if not current_msg_crops and history:
+            inferred = _infer_crop_from_history(history)
+            if inferred:
+                inferred_crop_note = (
+                    f"\n\n[सूचना: शेतकऱ्याने या मेसेजमध्ये पिकाचं नाव घेतलेलं नाही, पण वरच्या "
+                    f"संभाषणावरून हे स्पष्ट आहे की तो **{', '.join(inferred)}** बद्दलच पुढे विचारतोय — "
+                    f"तेच पीक गृहीत धर आणि थेट उत्तर दे. पुन्हा 'कोणत्या पिकाला?' विचारू नकोस.]"
+                )
 
         # Tavily web search — KNOWLEDGE dict madhe accurate/specific answer nasel tarच
         needs_search = await _needs_web_search(question, context, specific_found, unmapped_crops)
@@ -687,7 +733,7 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
         messages = [{"role": "system", "content": SYSTEM}]
 
         if history:
-            for h in history[-4:]:
+            for h in history[-6:]:
                 if h.get("user_message") and h["user_message"] not in ["[IMAGE]", "[VOICE]"]:
                     messages.append({"role": "user", "content": h["user_message"]})
                 if h.get("bot_response"):
@@ -697,6 +743,7 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
         if context:
             user_content += f"\n\nसंदर्भ माहिती:\n{context}"
         user_content += f"\n\nप्रश्न: {question}"
+        user_content += inferred_crop_note
 
         # KB/web मध्ये exact match nasel tar — LLM ला स्वतःच्या agronomy ज्ञानाने best-effort
         # उत्तर द्यायला सांग (deflect करू नकोस), पण accuracy स्पष्ट सांग.
