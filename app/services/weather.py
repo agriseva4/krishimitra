@@ -5,6 +5,35 @@ log = logging.getLogger(__name__)
 TO = httpx.Timeout(10.0, connect=5.0)
 BASE = "https://api.openweathermap.org/data/2.5"
 
+# OpenWeatherMap नेहमी इंग्रजीत description देतं (उदा. "light rain", "broken clouds") —
+# farmer ला ते तसंच पाठवलं जायचं. आता condition-code (id) वरून मराठी शब्द वापरतो.
+_WEATHER_MR = {
+    range(200, 233): "मेघगर्जनेसह पाऊस",
+    range(300, 322): "रिमझिम पाऊस",
+    range(500, 505): "पाऊस",
+    range(511, 512): "गोठणारा पाऊस",
+    range(520, 532): "सरींचा पाऊस",
+    range(600, 623): "बर्फवृष्टी",
+    range(701, 702): "धुके",
+    range(711, 712): "धूर",
+    range(721, 722): "धुरकट वातावरण",
+    range(731, 732): "वाळूचे वादळ",
+    range(741, 742): "दाट धुके",
+    range(751, 762): "वाळू/धूळमिश्रित वारा",
+    range(762, 763): "ज्वालामुखी राख",
+    range(771, 772): "वादळी वारा",
+    range(781, 782): "चक्रीवादळ",
+    range(800, 801): "स्वच्छ ऊन",
+    range(801, 803): "अंशतः ढगाळ",
+    range(803, 805): "ढगाळ वातावरण",
+}
+
+def _desc_mr(weather_id: int) -> str:
+    for r, mr in _WEATHER_MR.items():
+        if weather_id in r:
+            return mr
+    return "सर्वसाधारण हवामान"
+
 async def get_weather(lat=None, lon=None, city=None) -> str:
     lat = lat or DEFAULT_LAT
     lon = lon or DEFAULT_LON
@@ -26,9 +55,10 @@ def _fmt(c, f, city):
     try:
         temp, feels = c["main"]["temp"], c["main"]["feels_like"]
         humid, wind = c["main"]["humidity"], c["wind"]["speed"]
-        desc = c["weather"][0]["description"].capitalize()
+        weather_id = c["weather"][0]["id"]
+        desc = _desc_mr(weather_id)
         rain = c.get("rain", {}).get("1h", 0)
-        msg = (f"{_e(c['weather'][0]['id'])} *{city} — आजचे हवामान*\n\n"
+        msg = (f"{_e(weather_id)} *{city} — आजचे हवामान*\n\n"
                f"🌡️ तापमान: *{temp:.0f}°C* (जाणवते: {feels:.0f}°C)\n"
                f"💧 आर्द्रता: *{humid}%*\n"
                f"💨 वारा: {wind:.1f} m/s\n"
@@ -40,13 +70,13 @@ def _fmt(c, f, city):
             msg += "\n\n📅 *पुढे २४ तास:*"
             for item in f["list"][:4]:
                 t, tp = item["dt_txt"][11:16], item["main"]["temp"]
-                d = item["weather"][0]["description"]
+                d = _desc_mr(item["weather"][0]["id"])
                 r = item.get("rain", {}).get("3h", 0)
                 msg += f"\n• {t}: {tp:.0f}°C — {d}" + (f" 🌧️{r:.0f}mm" if r > 0 else "")
-        return msg + "\n\n_Source: OpenWeatherMap_"
+        return msg + "\n\n_स्रोत: OpenWeatherMap_"
     except Exception as e:
         log.error(f"weather fmt: {e}")
-        return "❌ *हवामान format error.*"
+        return "❌ *हवामान माहिती दाखवताना अडचण आली.*"
 
 def _e(w):
     if w < 300: return "⛈️"
