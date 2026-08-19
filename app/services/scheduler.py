@@ -1,19 +1,68 @@
 import logging, asyncio
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 log = logging.getLogger(__name__)
 _s = AsyncIOScheduler()
+IST = ZoneInfo("Asia/Kolkata")
 
 def start_scheduler():
     if _s.running: return
-    _s.add_job(morning, CronTrigger(hour=7, minute=0), id="morning", replace_existing=True)
-    _s.add_job(evening, CronTrigger(hour=18, minute=0), id="evening", replace_existing=True)
-    _s.add_job(weekly, CronTrigger(day_of_week="mon", hour=8, minute=0), id="weekly", replace_existing=True)
-    _s.add_job(weather_alert_check, CronTrigger(minute=0), id="weather_alert", replace_existing=True)
+    # टीप: Render server UTC वर चालतो, म्हणून timezone=IST स्पष्ट दिलंय —
+    # नाहीतर "सकाळी 7" प्रत्यक्षात भारतीय वेळेनुसार दुपारी 12:30 ला जाईल!
+    _s.add_job(morning, CronTrigger(hour=7, minute=0, timezone=IST), id="morning", replace_existing=True)
+    _s.add_job(daily_mandi, CronTrigger(hour=8, minute=30, timezone=IST), id="daily_mandi", replace_existing=True)
+    _s.add_job(evening, CronTrigger(hour=18, minute=0, timezone=IST), id="evening", replace_existing=True)
+    _s.add_job(weather_alert_check, CronTrigger(minute=0, timezone=IST), id="weather_alert", replace_existing=True)
     _s.start()
-    log.info("✅ Scheduler started: 7AM | 6PM | Monday | Hourly alert check")
+    log.info("✅ Scheduler started (IST): 7AM weather | 8:30AM mandi | 6PM tip | Hourly alert check")
+
+async def daily_mandi():
+    """Roj IST 8:30 la — pratyek farmer chya SWATA'chya crops sathi real mandi price + 7-din trend.
+    Hardcoded Onion/Tomato nahi — farmer.crops database madhun vachun tyachyach pikanche bhav pathavto."""
+    try:
+        from app.services.database import get_all_farmers
+        from app.services.mandi import get_mandi_prices, get_trend_line, CROP_MAP
+        from app.services.whatsapp import send_message
+        farmers = await get_all_farmers()
+        log.info(f"Daily mandi batch: {len(farmers)} farmers")
+        for f in farmers:
+            try:
+                district = f.get("district", "Pune")
+                farmer_crops = f.get("crops", [])
+
+                # farmer.crops madhle internal names (उदा. "onion","mango") Agmarknet
+                # commodity names madhe map kar (उदा. "Onion","Mango")
+                mapped = []
+                for c in farmer_crops:
+                    commodity = CROP_MAP.get(str(c).lower())
+                    if commodity and commodity not in mapped:
+                        mapped.append(commodity)
+                if not mapped:
+                    mapped = ["Onion", "Tomato"]  # farmer ne pik sangitla nasel tar default
+                mapped = mapped[:3]  # WhatsApp message jast lamb nako, max 3 pike
+
+                price_msg = await get_mandi_prices(district, crops=mapped)
+
+                trend_lines = []
+                for commodity in mapped:
+                    line = await get_trend_line(commodity, district)
+                    if line:
+                        trend_lines.append(line)
+
+                full_msg = f"🌅 *आजचा मंडई भाव — KrishiMitra*\n\n{price_msg}"
+                if trend_lines:
+                    full_msg += "\n\n📈 *७-दिवस कल:*\n" + "\n".join(trend_lines)
+                full_msg += "\n\n❓ इतर पिकाचा भाव हवा असेल तर पीक नाव पाठवा!"
+
+                await send_message(f["phone"], full_msg)
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                log.warning(f"Daily mandi {f.get('phone')}: {e}")
+    except Exception as e:
+        log.error(f"daily_mandi batch: {e}")
 
 async def weather_alert_check():
     try:
@@ -191,24 +240,6 @@ async def evening():
                 log.warning(f"Evening {f.get('phone')}: {e}")
     except Exception as e:
         log.error(f"Evening batch: {e}")
-
-async def weekly():
-    try:
-        from app.services.database import get_all_farmers
-        from app.services.mandi import get_mandi_prices
-        from app.services.whatsapp import send_message
-        mandi = await get_mandi_prices("Pune")
-        msg = f"📊 *साप्ताहिक मंडी अहवाल — KrishiMitra*\n\n{mandi}\n\n❓ भाव किंवा शेतीबद्दल काही विचारायचे असल्यास message करा!"
-        farmers = await get_all_farmers()
-        log.info(f"Weekly batch: {len(farmers)} farmers")
-        for f in farmers:
-            try:
-                await send_message(f["phone"], msg)
-                await asyncio.sleep(0.5)
-            except Exception as e:
-                log.warning(f"Weekly {f.get('phone')}: {e}")
-    except Exception as e:
-        log.error(f"Weekly batch: {e}")
 
 def _tip(m):
     tips = {
