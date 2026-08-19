@@ -119,7 +119,7 @@ async def handle(phone: str, message: dict, msg_type: str) -> str:
         return DISTRICT_SELECT
 
     if not farmer.get("is_approved"):
-        return "⏳ तुमची नोंदणी approve होणे बाकी आहे.\nAdmin लवकरच करील. धन्यवाद! 🙏"
+        return "⏳ तुमची नोंदणी मंजूर होणे बाकी आहे.\nप्रशासकाकडून लवकरच मंजुरी मिळेल. धन्यवाद! 🙏"
 
     if farmer.get("is_blocked"):
         return ""
