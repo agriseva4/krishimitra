@@ -17,8 +17,15 @@ CREATE TABLE IF NOT EXISTS farmers (
     is_approved BOOLEAN DEFAULT FALSE,
     is_free     BOOLEAN DEFAULT FALSE,
     is_blocked  BOOLEAN DEFAULT FALSE,
+    location_set BOOLEAN DEFAULT FALSE,
     created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- टीप: जर हा schema आधीच एकदा RUN केला असेल (म्हणजे table आधीच अस्तित्वात आहे),
+-- तर वरचा CREATE TABLE IF NOT EXISTS काहीच करणार नाही — त्यामुळे जुन्या table मध्ये
+-- location_set column manually add करावा लागेल. हे safe आहे, आधीच column असेल तर
+-- काहीच बदलणार नाही (IF NOT EXISTS मुळे):
+ALTER TABLE farmers ADD COLUMN IF NOT EXISTS location_set BOOLEAN DEFAULT FALSE;
 
 CREATE TABLE IF NOT EXISTS conversations (
     id              UUID DEFAULT gen_random_uuid() PRIMARY KEY,
