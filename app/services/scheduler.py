@@ -1,8 +1,9 @@
-import logging, asyncio
+import logging, asyncio, os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 log = logging.getLogger(__name__)
 _s = AsyncIOScheduler()
@@ -16,8 +17,30 @@ def start_scheduler():
     _s.add_job(daily_mandi, CronTrigger(hour=8, minute=30, timezone=IST), id="daily_mandi", replace_existing=True)
     _s.add_job(evening, CronTrigger(hour=18, minute=0, timezone=IST), id="evening", replace_existing=True)
     _s.add_job(weather_alert_check, CronTrigger(minute=0, timezone=IST), id="weather_alert", replace_existing=True)
+    # टीप: Render free tier 15 मिनिटं कोणतीही request न आल्यास service झोपवतो — तेव्हा हा
+    # scheduler सुद्धा थांबतो, आणि 7am/8:30am/6pm चे broadcasts चुकतात. दर 10 मिनिटांनी
+    # स्वतःच्या public URL ला ping करून service सतत जागी ठेवतो — UptimeRobot सारखी बाह्य
+    # सेवा न वापरता. (टीप: process पूर्णपणे झोपला/बंद पडला तर हा self-ping सुद्धा थांबतो —
+    # त्यामुळे पहिल्यांदा जागं करण्यासाठी अजूनही एखादी बाह्य ping सेवा असणं जास्त सुरक्षित आहे.)
+    _s.add_job(self_ping, IntervalTrigger(minutes=10), id="self_ping", replace_existing=True)
     _s.start()
-    log.info("✅ Scheduler started (IST): 7AM weather | 8:30AM mandi | 6PM tip | Hourly alert check")
+    log.info("✅ Scheduler started (IST): 7AM weather | 8:30AM mandi | 6PM tip | Hourly alert check | Self-ping every 10min")
+
+async def self_ping():
+    """Render free-tier service ला 15-मिनिटांच्या inactivity-sleep पासून वाचवण्यासाठी
+    दर 10 मिनिटांनी स्वतःच्याच /health endpoint ला ping करतो. RENDER_EXTERNAL_URL हा
+    Render आपोआप set करतो (manual config लागत नाही). Local/इतर hosting वर हा env var
+    नसेल तर हे function शांतपणे काहीच करत नाही."""
+    url = os.getenv("RENDER_EXTERNAL_URL")
+    if not url:
+        return
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.get(f"{url.rstrip('/')}/health")
+            log.info(f"Self-ping: {r.status_code}")
+    except Exception as e:
+        log.warning(f"Self-ping failed: {e}")
 
 async def daily_mandi():
     """Roj IST 8:30 la — pratyek farmer chya SWATA'chya crops sathi real mandi price + 7-din trend.
