@@ -555,12 +555,32 @@ def _get_context(question: str, farmer: dict, history: list = None) -> tuple:
     ani LLM la स्वतःच्या ज्ञानाने उत्तर द्यायला सांगायचं (deflect न करता)."""
     q = question.lower()
     farmer_crops = farmer.get("crops", [])
-    active_crops = _detect_crops(question, farmer_crops)
+
+    # टीप: current message madhe explicit crop naव aahe ka, farmer.crops chya
+    # fallback shivay, adhi te बघ — karan farmer.crops सहसा फक्त database cha
+    # DEFAULT placeholder (['onion','tomato']) astat, real crop navhe.
+    explicit_crops = _detect_crops(question, [])
+    active_crops = explicit_crops
     inferred_from_history = False
     if not active_crops and history:
         active_crops = _infer_crop_from_history(history)
         if active_crops:
             inferred_from_history = True
+
+    # जर current message मध्ये pik nahi, history madhehi सापडलं nahi, ani message खूप
+    # त्रोटक/vague aahe ("Rog upay", "Pik salla" सारखं — फक्त 1-4 shabda, kuthlach
+    # nemka symptom/pik nahi) — तर farmer.crops (जे बरेचदा फक्त default placeholder
+    # असतं, farmer ne kadhich confirm kelela navhे) वापरून अंदाजाने पूर्ण उत्तर देऊ नकोस.
+    # असं केलं तर वेगवेगळे vague प्रश्न विचारूनही तेच recycled उत्तर मिळतं — जे confusing आहे.
+    is_vague = len(question.split()) <= 4
+    if not active_crops and is_vague:
+        return "", False, []
+
+    if not active_crops:
+        # Message detailed आहे (symptom/context दिलाय) पण crop नाव नाही — आता farmer.crops
+        # वर अंदाज घेणं ठीक आहे, कारण निदान इतकी माहिती तरी आहे की उत्तर उपयोगी ठरेल.
+        active_crops = [c.lower() for c in farmer_crops] if farmer_crops else []
+
     parts = []
     specific_found = False
     unmapped = []
@@ -797,9 +817,20 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
         user_content += f"\n\nप्रश्न: {question}"
         user_content += inferred_crop_note
 
-        # KB/web मध्ये exact match nasel tar — LLM ला स्वतःच्या agronomy ज्ञानाने best-effort
-        # उत्तर द्यायला सांग (deflect करू नकोस), पण accuracy स्पष्ट सांग.
-        if not specific_found:
+        # टीप: तीन वेगळ्या केसेस — प्रत्येकीला वेगळी सूचना हवी:
+        # 1) प्रश्न खूप त्रोटक/अस्पष्ट (कुठलंच पीक/लक्षण सापडलं नाही) → अंदाज नको, नीट प्रश्न विचार
+        # 2) पीक ओळखलं पण आपल्या KB मध्ये specific माहिती नाही (उदा. आंबा) → best-effort उत्तर दे
+        # 3) पीक + KB दोन्ही सापडलं → verified उत्तर दे
+        is_ambiguous = (not specific_found) and (not unmapped_crops) and (not context.strip())
+        if is_ambiguous:
+            user_content += (
+                "\n\n[सूचना: शेतकऱ्याचा प्रश्न खूप त्रोटक/अस्पष्ट आहे — कुठलं पीक, कुठला भाग "
+                "(पान/खोड/फळ/मूळ), काय लक्षण याबद्दल काहीच स्पष्ट नाही. अंदाजाने उत्तर देऊ नकोस — "
+                "त्याला थोडक्यात, नैसर्गिक भाषेत विचार की नेमकं काय विचारायचंय (उदा. 'कोणत्या पिकाला "
+                "समस्या आहे आणि नक्की काय दिसतंय — पान पिवळी, डाग, किडे?'). एकाच वेळी एकच प्रश्न विचार. "
+                "अचूकता टॅग लिहू नकोस — अजून उत्तरच दिलेलं नाहीये.]"
+            )
+        elif not specific_found:
             user_content += (
                 "\n\n[सूचना: वरील संदर्भात या प्रश्नाचं exact answer नाही. तरी तुझ्या स्वतःच्या "
                 "कृषी ज्ञानाने प्रामाणिक, practical उत्तर दे — टाळू नकोस किंवा फक्त 'कृषी केंद्राला विचारा' "
