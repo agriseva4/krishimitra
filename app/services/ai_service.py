@@ -352,8 +352,10 @@ Farmer नक्की कोणत्या पिकाबद्दल वि�
   आता "अजून काय उपाय करावे", "ते झालं नाही", "अजून सांग", "काय करू" असं generic follow-up विचारत असेल —
   तर तो **त्याच आधीच्या पिकाबद्दलच** बोलतोय असं गृहीत धर. पुन्हा "कोणत्या पिकाला?" विचारू नकोस —
   हे farmer ला irritate करतं आणि agent त्याचं बोलणं विसरतो असं वाटतं.
-- फक्त तेव्हाच पीक विचार जेव्हा — (अ) ही farmer ची पहिलीच query आहे (history रिकामी आहे), किंवा
-  (ब) farmer ने स्पष्टपणे नवीन/वेगळा विषय सुरू केलाय ज्याचा आधीच्या पिकाशी संबंध नाही
+- पीक विचार जेव्हा — (अ) current message मध्ये पीक नाही आणि history मध्येही (वरती दिलेल्या मागच्या
+  संदेशांत) कुठलंच पीक सापडत नाही, किंवा (ब) farmer ने स्पष्टपणे नवीन/वेगळा विषय सुरू केलाय ज्याचा
+  आधीच्या पिकाशी संबंध नाही — context मध्ये माहिती दिलेली नसेल तर हे नक्की झालेलं आहे, त्यामुळे तेव्हा
+  डायरेक्ट विचार, अंदाज घेऊ नकोस
 - कधीही स्वतःहून कांदा/टोमॅटो गृहीत धरू नकोस — पीक अनिश्चित असेल आणि history मध्येही सापडत नसेल तरच विचार, आणि कुठलंही specific पीक उदाहरण म्हणून सुचवू नकोस
 
 ## जर एकाच वेळी 2-3 पिकांची नावं घेतली असतील (उदा. "कांदा आणि टोमॅटो दोन्हीबद्दल सांग"):
@@ -554,11 +556,11 @@ def _get_context(question: str, farmer: dict, history: list = None) -> tuple:
     tyanchi specific entry nahi (उदा. आंबा, ज्वारी) → asha veli web search FORCE karaycha
     ani LLM la स्वतःच्या ज्ञानाने उत्तर द्यायला सांगायचं (deflect न करता)."""
     q = question.lower()
-    farmer_crops = farmer.get("crops", [])
 
-    # टीप: current message madhe explicit crop naव aahe ka, farmer.crops chya
-    # fallback shivay, adhi te बघ — karan farmer.crops सहसा फक्त database cha
-    # DEFAULT placeholder (['onion','tomato']) astat, real crop navhe.
+    # टीप: प्रत्येक वेळी crop EXPLICIT हवा — current message मध्ये किंवा conversation
+    # history मध्ये. farmer.crops (जो database चा DEFAULT placeholder ['onion','tomato']
+    # असतो, farmer ने कधीच confirm केलेला नसतो) इथे कधीच गृहीत धरायचा नाही — नाहीतर
+    # प्रत्येक अस्पष्ट प्रश्नाला आपोआप "कांदा/टोमॅटो" उत्तर जातं, जे चुकीचं आणि गोंधळात टाकणारं आहे.
     explicit_crops = _detect_crops(question, [])
     active_crops = explicit_crops
     inferred_from_history = False
@@ -567,25 +569,18 @@ def _get_context(question: str, farmer: dict, history: list = None) -> tuple:
         if active_crops:
             inferred_from_history = True
 
-    # जर current message मध्ये pik nahi, history madhehi सापडलं nahi, ani message खूप
-    # त्रोटक/vague aahe ("Rog upay", "Pik salla" सारखं — फक्त 1-4 shabda, kuthlach
-    # nemka symptom/pik nahi) — तर farmer.crops (जे बरेचदा फक्त default placeholder
-    # असतं, farmer ne kadhich confirm kelela navhे) वापरून अंदाजाने पूर्ण उत्तर देऊ नकोस.
-    # असं केलं तर वेगवेगळे vague प्रश्न विचारूनही तेच recycled उत्तर मिळतं — जे confusing आहे.
-    is_vague = len(question.split()) <= 4
-    if not active_crops and is_vague:
-        return "", False, []
-
+    # पीक कुठेच सापडलं नाही (ना current message, ना history) — तर farmer.crops वर अंदाज
+    # घेऊन उत्तर देऊ नकोस. मॉडेलला थेट विचारू दे "कोणत्या पिकाबद्दल आहे?"
     if not active_crops:
-        # Message detailed आहे (symptom/context दिलाय) पण crop नाव नाही — आता farmer.crops
-        # वर अंदाज घेणं ठीक आहे, कारण निदान इतकी माहिती तरी आहे की उत्तर उपयोगी ठरेल.
-        active_crops = [c.lower() for c in farmer_crops] if farmer_crops else []
+        return "", False, []
 
     parts = []
     specific_found = False
     unmapped = []
+    topic_matched = False
 
     if any(w in q for w in DISEASE_WORDS):
+        topic_matched = True
         if len(active_crops) > 1:
             for crop in active_crops:
                 key = _DISEASE_MAP.get(crop)
@@ -605,6 +600,7 @@ def _get_context(question: str, farmer: dict, history: list = None) -> tuple:
         parts.append(KNOWLEDGE["pest_control"])
 
     if any(w in q for w in FERTILIZER_WORDS):
+        topic_matched = True
         for crop in active_crops:
             key = _FERT_MAP.get(crop)
             if key and KNOWLEDGE.get(key):
@@ -614,21 +610,24 @@ def _get_context(question: str, farmer: dict, history: list = None) -> tuple:
                 unmapped.append(crop)
 
     if any(w in q for w in SEASON_WORDS):
+        topic_matched = True
         parts.append(KNOWLEDGE["seasonal_calendar"])
         specific_found = True
 
     if any(w in q for w in WATER_WORDS):
+        topic_matched = True
         parts.append(KNOWLEDGE["irrigation"])
         specific_found = True
 
     if any(w in q for w in SCHEME_WORDS):
+        topic_matched = True
         parts.append(KNOWLEDGE["government_schemes"])
         specific_found = True
 
-    # Default fallback — kahi intent match nahi zala tar farmer chya crops chi info de
-    # (उदा. "ajun konte upay karave" सारखा generic follow-up — DISEASE_WORDS madhe match
-    # navhte, tarihi history vaparun olakhlela crop cha disease KB ithe include karaycha)
-    if not parts or inferred_from_history:
+    # Follow-up case — history वरून crop मिळाला (current message मध्ये topic keyword
+    # नसतानाही, उदा. "ajun konte upay karave"): हे आधीच्याच विषयाची निरंतरता आहे,
+    # त्यामुळे त्या crop चं disease+fert KB देणं योग्य.
+    if inferred_from_history and not topic_matched:
         for crop in active_crops:
             d_key = _DISEASE_MAP.get(crop)
             f_key = _FERT_MAP.get(crop)
@@ -638,6 +637,17 @@ def _get_context(question: str, farmer: dict, history: list = None) -> tuple:
                 parts.append(KNOWLEDGE[f_key]); specific_found = True
             if crop in OTHER_CROPS and crop not in unmapped:
                 unmapped.append(crop)
+
+    # टीप: topic कुठल्याच ओळखीच्या category मध्ये बसत नसेल (disease/fert/water/season/
+    # scheme नाही) आणि हा follow-up सुद्धा नाही — म्हणजे शेतकऱ्याने काहीतरी वेगळंच विचारलंय
+    # (उदा. "कांदा कधी काढायचा", "बाजारभाव कसा ठरतो"). अशा वेळी चुकीचा disease+fert dump
+    # देण्याऐवजी context रिकामा सोड — यामुळे आपोआप web search trigger होईल आणि खऱ्या
+    # प्रश्नाला संबंधित उत्तर मिळेल, ऐवजी नेहमी रोग/खताची माहिती चिकटवण्याऐवजी.
+    if not topic_matched and not inferred_from_history:
+        for crop in active_crops:
+            if crop not in unmapped:
+                unmapped.append(crop)
+        return "", False, unmapped
 
     return "\n\n".join(parts), specific_found, unmapped
 
@@ -774,6 +784,13 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
         district = farmer.get("district", "Pune")
         context, specific_found, unmapped_crops = _get_context(question, farmer, history)
 
+        # टीप: तीन केसेस वेगळ्या ओळखतो — पुढे Tavily आणि prompt दोन्हीसाठी वापरायला:
+        # 1) is_ambiguous — कुठलंच पीक ओळखलं गेलं नाही (ना message, ना history) → Tavily
+        #    call करायचाच नाही (कशाबद्दल search करणार?) — model ला थेट विचारू दे.
+        # 2) specific_found False + unmapped_crops आहे — पीक माहीत, KB मध्ये नाही → search कर
+        # 3) specific_found True — verified माहिती आधीच आहे
+        is_ambiguous = (not specific_found) and (not unmapped_crops) and (not context.strip())
+
         # Follow-up question आहे का — म्हणजे current message madhe crop mention nasla,
         # pan history madhun tो olakhla gela. Asel tar model la explicit sanga, nahitar
         # tо parat "kontya pikala?" vicharat rahil (jari history var vishayacha context asel tari).
@@ -788,10 +805,13 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
                     f"तेच पीक गृहीत धर आणि थेट उत्तर दे. पुन्हा 'कोणत्या पिकाला?' विचारू नकोस.]"
                 )
 
-        # Tavily web search — KNOWLEDGE dict madhe accurate/specific answer nasel tarच
-        needs_search = await _needs_web_search(question, context, specific_found, unmapped_crops)
+        # Tavily web search — KNOWLEDGE dict madhe accurate/specific answer nasel tarच.
+        # is_ambiguous असेल तर कधीच call करू नकोस — पीकच माहीत नसताना search केला तर
+        # farmer_crops chya DEFAULT (कांदा/टोमॅटो) वर आधारित चुकीचा search होतो, आणि उगाच
+        # Tavily quota (1000 credits/month) वाया जातो.
+        needs_search = (not is_ambiguous) and await _needs_web_search(question, context, specific_found, unmapped_crops)
         if TAVILY_API_KEY and needs_search:
-            tavily_query = _build_tavily_query(question, farmer_crops or unmapped_crops)
+            tavily_query = _build_tavily_query(question, unmapped_crops or current_msg_crops)
             web_info = await _tavily_search(tavily_query)
             if web_info:
                 context = (context + f"\n\nइंटरनेट माहिती:\n{web_info}").strip()
@@ -822,6 +842,13 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
         # 2) पीक ओळखलं पण आपल्या KB मध्ये specific माहिती नाही (उदा. आंबा) → best-effort उत्तर दे
         # 3) पीक + KB दोन्ही सापडलं → verified उत्तर दे
         is_ambiguous = (not specific_found) and (not unmapped_crops) and (not context.strip())
+
+        # टीप: हे 1 ओळीचं log — पुढच्या आठवड्यात keyword-matching किती वेळा चुकतंय ते
+        # प्रत्यक्ष मोजण्यासाठी. Render च्या Logs tab मध्ये "ROUTING_STATS" search कर —
+        # ambiguous किती % आहे ते बघून ठरव tool-calling कडे जायचं का.
+        route = "AMBIGUOUS" if is_ambiguous else ("UNMAPPED_CROP" if unmapped_crops else ("KB_HIT" if specific_found else "OTHER"))
+        log.info(f"ROUTING_STATS | route={route} | q_words={len(question.split())} | crops={unmapped_crops or 'known'}")
+
         if is_ambiguous:
             user_content += (
                 "\n\n[सूचना: शेतकऱ्याचा प्रश्न खूप त्रोटक/अस्पष्ट आहे — कुठलं पीक, कुठला भाग "
