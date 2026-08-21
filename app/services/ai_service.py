@@ -1,13 +1,17 @@
 import logging
 import httpx
-from app.config import GROQ_API_KEY, CEREBRAS_API_KEY, TAVILY_API_KEY
+from app.config import GROQ_API_KEY, TAVILY_API_KEY, GEMINI_API_KEY
 
 log = logging.getLogger(__name__)
 
 GROQ_URL       = "https://api.groq.com/openai/v1/chat/completions"
-CEREBRAS_URL   = "https://api.cerebras.ai/v1/chat/completions"
+# Google cha OpenAI-compatible endpoint — मूळ Groq call cha ekach pattern vaparta yeto,
+# vegळा SDK lagत nahi. Free tier: 15 RPM, 250,000 TPM, 1000 RPD — Groq peksha 31 पट जास्त
+# tokens/minute, ani Marathi sathi खूप जास्त अचूक. Card lagत nahi.
+# टीप: Cerebras (payment-required issue मुळे) पूर्णपणे काढून टाकलाय — फक्त Gemini + Groq वापरतोय.
+GEMINI_URL     = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 GROQ_MODEL     = "openai/gpt-oss-120b"
-CEREBRAS_MODEL = "gpt-oss-120b"
+GEMINI_MODEL   = "gemini-2.5-flash-lite"
 
 # ── Knowledge Base — सर्व प्रमुख पिके ───────────────────────────────────────
 KNOWLEDGE = {
@@ -336,7 +340,7 @@ SYSTEM = """तू KrishiMitra आहेस — Maharashtra च्या शे�
 
 एकाच वेळी 2-3 पिकं नाव घेतली असतील तर प्रत्येकाचं उत्तर वेगळं, स्पष्ट दे — एकत्र मिसळू नकोस.
 
-## उत्तर लांबी: 120-150 शब्द कमाल. फक्त विचारलेल्या प्रश्नाचंच उत्तर, एकच मुख्य उपाय — सगळे पर्याय list करू नकोस.
+## उत्तर लांबी: 80-100 शब्द कमाल — शक्य तितकं थोडक्यात, नेमकं. फक्त विचारलेल्या प्रश्नाचंच उत्तर, एकच मुख्य उपाय — सगळे पर्याय list करू नकोस, extra स्पष्टीकरण नको.
 
 ## Format — फक्त रोग/खत सल्ल्यासाठी:
 रोग: 🔍 समस्या 📌 लक्षणे ✅ उपाय (exact dose, 15L पंप) ⚠️ काळजी
@@ -611,22 +615,25 @@ def _clean_llm_output(text: str) -> str:
     text = re.sub(r"<\|[a-zA-Z_]+\|>", "", text)
     return text.strip()
 
-async def _cerebras_call(messages: list, max_tokens: int = 600) -> str:
-    if not CEREBRAS_API_KEY: return ""
+async def _gemini_call(messages: list, max_tokens: int = 600) -> str:
+    """Google Gemini — OpenAI-compatible endpoint वापरून, त्यामुळे Cerebras/Groq सारखाच
+    call pattern. Free tier: 15 RPM, 250,000 TPM (Groq पेक्षा 31 पट जास्त), 1000 RPD.
+    Card लागत नाही — aistudio.google.com वर मोफत key मिळते."""
+    if not GEMINI_API_KEY: return ""
     try:
         async with httpx.AsyncClient(timeout=30) as c:
             r = await c.post(
-                CEREBRAS_URL,
-                headers={"Authorization": f"Bearer {CEREBRAS_API_KEY}", "Content-Type": "application/json"},
-                json={"model": CEREBRAS_MODEL, "messages": messages, "max_tokens": max_tokens,
-                      "temperature": 0.4, "reasoning_effort": "low"}
+                GEMINI_URL,
+                headers={"Authorization": f"Bearer {GEMINI_API_KEY}", "Content-Type": "application/json"},
+                json={"model": GEMINI_MODEL, "messages": messages, "max_tokens": max_tokens,
+                      "temperature": 0.4}
             )
             if r.status_code == 200:
                 return _clean_llm_output(r.json()["choices"][0]["message"]["content"])
-            log.error(f"Cerebras: {r.status_code} {r.text[:100]}")
+            log.error(f"Gemini: {r.status_code} {r.text[:150]}")
             return ""
     except Exception as e:
-        log.error(f"Cerebras failed: {e}")
+        log.error(f"Gemini failed: {e}")
         return ""
 
 async def _groq_call(messages: list, max_tokens: int = 600) -> str:
@@ -723,7 +730,7 @@ def _build_tavily_query(question: str, farmer_crops: list) -> str:
     return question
 
 async def farming_answer(question: str, farmer: dict, history: list = None) -> str:
-    if not CEREBRAS_API_KEY and not GROQ_API_KEY:
+    if not GEMINI_API_KEY and not GROQ_API_KEY:
         return "❌ सेवा सध्या उपलब्ध नाही. थोड्या वेळाने विचारा. 🙏"
     try:
         farmer_crops = farmer.get("crops", [])
@@ -820,13 +827,13 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
 
         messages.append({"role": "user", "content": user_content})
 
-        # टीप: max_tokens 350 वर परत आणलं (Groq च्या 8K/minute quota वर सध्या 100% भार
-        # असल्याने) — reasoning_effort "low" असल्याने hidden thinking tokens कमी लागतात,
-        # त्यामुळे 350 पुरेसं आहे.
-        ans = await _cerebras_call(messages, 350)
+        # टीप: Cerebras सध्या पूर्ण बंद केलंय (payment-required issue) — chain मधून काढलंय,
+        # वेळ वाया जात नाही (आधी fail होऊन मग पुढच्याकडे जायला लागायचा वेळ आता वाचतो).
+        # Gemini (primary, 250K TPM free) → Groq (fallback, 8K TPM free) — फक्त दोनच पुरेसे आहेत.
+        ans = await _gemini_call(messages, 250)
         if not ans:
-            log.warning("Cerebras failed → Groq fallback")
-            ans = await _groq_call(messages, 350)
+            log.warning("Gemini failed → Groq fallback")
+            ans = await _groq_call(messages, 250)
         if not ans:
             return "❌ थोडी अडचण आली. पुन्हा विचारा. 🙏"
 
