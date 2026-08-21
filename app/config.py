@@ -8,7 +8,6 @@ META_ACCESS_TOKEN    = os.getenv("META_ACCESS_TOKEN", "")
 META_PHONE_NUMBER_ID = os.getenv("META_PHONE_NUMBER_ID", "")
 GEMINI_API_KEY       = os.getenv("GEMINI_API_KEY", "")
 GROQ_API_KEY         = os.getenv("GROQ_API_KEY", "")
-CEREBRAS_API_KEY     = os.getenv("CEREBRAS_API_KEY", "")
 TAVILY_API_KEY       = os.getenv("TAVILY_API_KEY", "")
 SUPABASE_URL         = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY         = os.getenv("SUPABASE_KEY", "")
@@ -23,8 +22,8 @@ def validate():
     keys = {
         "META_ACCESS_TOKEN": META_ACCESS_TOKEN,
         "META_PHONE_NUMBER_ID": META_PHONE_NUMBER_ID,
+        "GEMINI_API_KEY": GEMINI_API_KEY,
         "GROQ_API_KEY": GROQ_API_KEY,
-        "CEREBRAS_API_KEY": CEREBRAS_API_KEY,
         "SUPABASE_URL": SUPABASE_URL,
         "SUPABASE_KEY": SUPABASE_KEY,
         "OPENWEATHER_API_KEY": OPENWEATHER_API_KEY,
