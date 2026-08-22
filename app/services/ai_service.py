@@ -495,7 +495,7 @@ def _infer_crop_from_history(history: list) -> list:
     ani farmer la vatta ki tyani adhi vicharlele agent la aathvatach nahi."""
     if not history:
         return []
-    for h in reversed(history[-3:]):  # सर्वात अलीकडचा turn आधी check कर
+    for h in reversed(history[-4:]):  # सर्वात अलीकडचा turn आधी check कर
         combined = f"{h.get('user_message','') or ''} {h.get('bot_response','') or ''}"
         crops = _detect_crops(combined, [])
         if crops:
@@ -791,14 +791,13 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
 
         # टीप: history madhle june bot-answers kadhi kadhi lambe astat (250+ shabda).
         # ते जसेच्या तसे परत पाठवले तर context खूप मोठा होतो — free-tier token
-        # quota (Cerebras/Groq) वर अनावश्यक ताण पडतो. म्हणून प्रत्येक जुना संदेश थोडक्यात कापतो —
-        # crop/topic ओळखण्यासाठी हे पुरेसं आहे, पूर्ण जुनं उत्तर परत पाठवायची गरज नाही.
-        # टीप: Cerebras सध्या payment-required मुळे बंद आहे → 100% भार Groq वर (फक्त
-        # 8,000 tokens/minute free tier). त्यामुळे history/tokens शक्य तितकं कमी ठेवलंय —
-        # Cerebras परत सुरू झाल्यावर हे परत वाढवता येईल.
-        _HISTORY_CHAR_CAP = 180
+        # टीप: Gemini primary झाल्यापासून (250K TPM free — Groq च्या 8K पेक्षा 31 पट जास्त)
+        # इथे आता जास्त जागा आहे. History थोडी वाढवली — म्हणजे model ला जुन्या संभाषणाचा
+        # जास्त संदर्भ मिळेल (follow-up प्रश्न, "ते काम नाही झालं" सारखे मागच्या उत्तराचा संदर्भ
+        # घेणारे प्रश्न जास्त चांगले समजतील).
+        _HISTORY_CHAR_CAP = 300
         if history:
-            for h in history[-3:]:
+            for h in history[-4:]:
                 if h.get("user_message") and h["user_message"] not in ["[IMAGE]", "[VOICE]"]:
                     messages.append({"role": "user", "content": h["user_message"][:_HISTORY_CHAR_CAP]})
                 if h.get("bot_response"):
@@ -898,14 +897,7 @@ async def disease_detect(image_bytes: bytes, caption: str, farmer: dict) -> str:
                 KNOWLEDGE["brinjal_disease"], KNOWLEDGE["pest_control"],
             ])
 
-        async with httpx.AsyncClient(timeout=30) as c:
-            r = await c.post(
-                GROQ_URL,
-                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-                json={
-                    "model": "qwen/qwen3.6-27b",
-                    "messages": [{"role": "user", "content": [
-                        {"type": "text", "text": f"""तू KrishiMitra आहेस — अनुभवी कृषी रोग तज्ञ.
+        prompt_text = f"""तू KrishiMitra आहेस — अनुभवी कृषी रोग तज्ञ.
 
 संदर्भ:
 {context}
@@ -929,15 +921,48 @@ async def disease_detect(image_bytes: bytes, caption: str, farmer: dict) -> str:
 - [महत्त्वाची सूचना]
 
 शेतकरी {crops} घेतो. {f'शेतकरी म्हणतो: {caption}' if caption else ''}
-फोटो नीट दिसत नसेल → "अधिक जवळून, प्रकाशात फोटो पाठवा" सांग."""},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
-                    ]}],
-                    "max_tokens": 500,
-                    "temperature": 0.1
-                }
-            )
-        if r.status_code == 200:
-            d = r.json()["choices"][0]["message"]["content"].strip()
+फोटो नीट दिसत नसेल → "अधिक जवळून, प्रकाशात फोटो पाठवा" सांग."""
+
+        vision_messages = [{"role": "user", "content": [
+            {"type": "text", "text": prompt_text},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
+        ]}]
+
+        # टीप: Gemini ला photo-analysis साठी सुद्धा primary बनवलं — त्याचा image/vision
+        # quota Groq च्या chat quota पेक्षा वेगळा आहे, त्यामुळे दोन्ही मिळून जास्त भक्कम uptime.
+        # Groq (qwen vision model) फक्त fallback म्हणून राहतो.
+        d = ""
+        if GEMINI_API_KEY:
+            try:
+                async with httpx.AsyncClient(timeout=30) as c:
+                    r = await c.post(
+                        GEMINI_URL,
+                        headers={"Authorization": f"Bearer {GEMINI_API_KEY}", "Content-Type": "application/json"},
+                        json={"model": GEMINI_MODEL, "messages": vision_messages, "max_tokens": 400, "temperature": 0.1}
+                    )
+                    if r.status_code == 200:
+                        d = _clean_llm_output(r.json()["choices"][0]["message"]["content"])
+                    else:
+                        log.warning(f"Gemini vision failed [{r.status_code}] → Groq fallback")
+            except Exception as e:
+                log.warning(f"Gemini vision failed → Groq fallback: {e}")
+
+        if not d and GROQ_API_KEY:
+            async with httpx.AsyncClient(timeout=30) as c:
+                r = await c.post(
+                    GROQ_URL,
+                    headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                    json={
+                        "model": "qwen/qwen3.6-27b",
+                        "messages": vision_messages,
+                        "max_tokens": 500,
+                        "temperature": 0.1
+                    }
+                )
+            if r.status_code == 200:
+                d = r.json()["choices"][0]["message"]["content"].strip()
+
+        if d:
             result = f"{d}\n\n📞 _कृषी हेल्पलाइन: 1800-180-1551 (मोफत)_"
             # Low confidence असेल तर specific re-take instructions जोड
             if "विश्वास: कमी" in d or "confidence: low" in d.lower():
