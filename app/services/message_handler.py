@@ -2,7 +2,7 @@ import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from app.services.database import get_farmer, create_farmer, log_conv, get_last_messages, update_farmer_location, update_farmer_crops
-from app.services.ai_service import farming_answer, disease_detect, voice_to_text, CROP_KEYWORDS
+from app.services.ai_service import farming_answer, disease_detect, voice_to_text, CROP_KEYWORDS, DISEASE_WORDS, FERTILIZER_WORDS
 from app.services.weather import get_weather
 from app.services.mandi import get_mandi_prices
 from app.services.whatsapp import get_media_url, download_media
@@ -101,9 +101,12 @@ WEATHER_WORDS = [
 
 MANDI_WORDS = [
     "bhav", "भाव", "mandi", "मंडई", "market", "बाजार",
-    "rate", "किंमत", "price", "kanda", "tamatar", "दर",
-    "aaj", "today", "आजचा"
+    "rate", "किंमत", "price", "दर",
 ]
+# टीप: आधी "kanda", "tamatar", "aaj", "today", "आजचा" पण होते — पण हे खूप generic होते.
+# "kanda" हा फक्त पिकाचं नाव आहे, price-specific नाही — त्यामुळे "kandyala rog aalay"
+# (कांद्याला रोग आलाय — तातडीचा disease प्रश्न!) सुद्धा चुकून mandi price दाखवायचा,
+# खरा disease सल्ला न देता. हे काढल्यामुळे आता फक्त खरे price-केंद्रित प्रश्नच match होतील.
 
 async def handle(phone: str, message: dict, msg_type: str) -> str:
     if phone in FREE_NUMBERS:
@@ -189,14 +192,21 @@ async def _text(phone: str, text: str, farmer: dict) -> str:
         now = datetime.now(ZoneInfo("Asia/Kolkata"))
         return f"📅 आजची तारीख: *{now.day} {months_mr[now.month]} {now.year}*"
 
-    if any(w in t for w in WEATHER_WORDS):
+    # टीप: DISEASE_WORDS/FERTILIZER_WORDS असतील तर हवामान shortcut ने hijack करायचं नाही —
+    # "थंडीमुळे पान सुकतंय" सारखा प्रश्न disease-सल्ला हवा असतो, नुसता hवामान अंदाज नाही.
+    _early_disease_fert_check = any(w in t for w in DISEASE_WORDS) or any(w in t for w in FERTILIZER_WORDS)
+
+    if any(w in t for w in WEATHER_WORDS) and not _early_disease_fert_check:
         return await get_weather(
             farmer.get("lat", 18.5204),
             farmer.get("lon", 73.8567),
             farmer.get("city", farmer.get("district", "Pune"))
         )
 
-    if any(w in t for w in MANDI_WORDS):
+    # टीप: DISEASE_WORDS/FERTILIZER_WORDS असतील तर हे मंडई-भाव पेक्षा जास्त तातडीचं आहे —
+    # farmer ला रोग/खताचा प्रश्न असेल तर price shortcut ने तो hijack करायचा नाही, नाहीतर
+    # "कांद्याला रोग आलाय" सारखा तातडीचा प्रश्न चुकून फक्त भाव दाखवून थांबायचा.
+    if any(w in t for w in MANDI_WORDS) and not _early_disease_fert_check:
         district = farmer.get("district", "Pune")
         return await get_mandi_prices(district)
 
