@@ -1,4 +1,6 @@
 import logging
+import random
+import re
 import httpx
 from app.config import GROQ_API_KEY, TAVILY_API_KEY, GEMINI_API_KEY
 
@@ -604,7 +606,6 @@ def _get_context(question: str, farmer: dict, history: list = None) -> tuple:
     return "\n\n".join(parts), specific_found, unmapped
 
 # ── API Calls ──────────────────────────────────────────────────────────────
-import re
 
 def _clean_llm_output(text: str) -> str:
     """gpt-oss (Harmony format) chya kadhi-kadhi chukun leak hoणाऱ्या internal control
@@ -767,7 +768,6 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
         # टोकन/API call पूर्ण वाचतो (मोफत quota साठी अजून चांगलं).
         if is_ambiguous:
             log.info(f"ROUTING_STATS | route=AMBIGUOUS | q_words={len(question.split())} | crops=known")
-            import random
             clarifying_questions = [
                 "कोणत्या पिकाबद्दल आणि नेमकी काय समस्या आहे — पानांवर डाग, किडे, झाड वाळतंय, की खताबद्दल प्रश्न आहे? जरा सांगा 🌾",
                 "पीक कोणतं आहे, आणि काय अडचण येतेय ते जरा स्पष्ट सांगा — मग नेमकं उत्तर देतो 🙏",
@@ -789,12 +789,9 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
 
         messages = [{"role": "system", "content": SYSTEM}]
 
-        # टीप: history madhle june bot-answers kadhi kadhi lambe astat (250+ shabda).
-        # ते जसेच्या तसे परत पाठवले तर context खूप मोठा होतो — free-tier token
         # टीप: Gemini primary झाल्यापासून (250K TPM free — Groq च्या 8K पेक्षा 31 पट जास्त)
-        # इथे आता जास्त जागा आहे. History थोडी वाढवली — म्हणजे model ला जुन्या संभाषणाचा
-        # जास्त संदर्भ मिळेल (follow-up प्रश्न, "ते काम नाही झालं" सारखे मागच्या उत्तराचा संदर्भ
-        # घेणारे प्रश्न जास्त चांगले समजतील).
+        # आता जास्त जागा आहे. History वाढवली — model ला जुन्या संभाषणाचा जास्त संदर्भ मिळेल
+        # (follow-up प्रश्न, "ते काम नाही झालं" सारखे मागच्या उत्तराचा संदर्भ घेणारे प्रश्न).
         _HISTORY_CHAR_CAP = 300
         if history:
             for h in history[-4:]:
@@ -843,15 +840,6 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
         log.error(f"farming_answer: {e}")
         return "❌ थोडी अडचण आली. पुन्हा विचारा. 🙏"
 
-_DISEASE_KB_MAP = {
-    "onion": "onion_disease", "tomato": "tomato_disease",
-    "cotton": "cotton_disease", "soybean": "soybean_disease",
-    "grape": "grape_disease", "pomegranate": "pomegranate_disease",
-    "potato": "potato_disease", "wheat": "wheat_disease",
-    "chilli": "chilli_disease", "brinjal": "brinjal_disease",
-    "sugarcane": "sugarcane_disease",
-}
-
 def _identify_photo_crop(caption: str, farmer_crops: list) -> list:
     """Caption ani farmer.crops वरून konta pik असेल ओळखण्याचा प्रयत्न — ओळखलं तरच specific KB धाडतो"""
     text = (caption or "").lower()
@@ -862,7 +850,7 @@ def _identify_photo_crop(caption: str, farmer_crops: list) -> list:
     if found:
         return found
     if farmer_crops:
-        normalized = [c.lower() for c in farmer_crops if c.lower() in _DISEASE_KB_MAP]
+        normalized = [c.lower() for c in farmer_crops if c.lower() in _DISEASE_MAP]
         if len(normalized) == 1:
             return normalized
     return []  # unidentified — sagla KB pathav
@@ -886,7 +874,7 @@ async def disease_detect(image_bytes: bytes, caption: str, farmer: dict) -> str:
         # Crop ओळखण्याचा प्रयत्न — ओळखलं तर फक्त त्याच पिकाचं KB, नाहीतर सगळं (current behavior)
         identified = _identify_photo_crop(caption, farmer_crops)
         if identified:
-            kb_keys = [_DISEASE_KB_MAP[c] for c in identified if c in _DISEASE_KB_MAP]
+            kb_keys = [_DISEASE_MAP[c] for c in identified if c in _DISEASE_MAP]
             context = "\n\n".join([KNOWLEDGE[k] for k in kb_keys] + [KNOWLEDGE["pest_control"]])
         else:
             context = "\n\n".join([
