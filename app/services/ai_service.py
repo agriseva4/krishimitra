@@ -760,6 +760,21 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
                     f"तेच पीक गृहीत धर आणि थेट उत्तर दे. पुन्हा 'कोणत्या पिकाला?' विचारू नकोस.]"
                 )
 
+        # टीप: is_ambiguous असेल तर LLM ला call करायचंच नाही — deterministic (code-level)
+        # clarifying question थेट पाठव. आधी LLM ला "विचार, अंदाज नको" अशी सूचना द्यायचो, पण
+        # कधीकधी model तरीही conversation history मधली जुनी माहिती (उदा. आधीचा मंडई भाव) वापरून
+        # confident उत्तर द्यायचा — instruction ignore व्हायची. हे 100% खात्रीशीर आहे, आणि
+        # टोकन/API call पूर्ण वाचतो (मोफत quota साठी अजून चांगलं).
+        if is_ambiguous:
+            log.info(f"ROUTING_STATS | route=AMBIGUOUS | q_words={len(question.split())} | crops=known")
+            import random
+            clarifying_questions = [
+                "कोणत्या पिकाबद्दल आणि नेमकी काय समस्या आहे — पानांवर डाग, किडे, झाड वाळतंय, की खताबद्दल प्रश्न आहे? जरा सांगा 🌾",
+                "पीक कोणतं आहे, आणि काय अडचण येतेय ते जरा स्पष्ट सांगा — मग नेमकं उत्तर देतो 🙏",
+                "कोणत्या पिकाला त्रास होतोय? आणि लक्षण काय दिसतंय — पान पिवळी, डाग, अळी, की काही वेगळंच?",
+            ]
+            return random.choice(clarifying_questions)
+
         # Tavily web search — KNOWLEDGE dict madhe accurate/specific answer nasel tarच.
         # is_ambiguous असेल तर कधीच call करू नकोस — पीकच माहीत नसताना search केला तर
         # farmer_crops chya DEFAULT (कांदा/टोमॅटो) वर आधारित चुकीचा search होतो, आणि उगाच
@@ -795,27 +810,13 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
         user_content += f"\n\nप्रश्न: {question}"
         user_content += inferred_crop_note
 
-        # टीप: तीन वेगळ्या केसेस — प्रत्येकीला वेगळी सूचना हवी:
-        # 1) प्रश्न खूप त्रोटक/अस्पष्ट (कुठलंच पीक/लक्षण सापडलं नाही) → अंदाज नको, नीट प्रश्न विचार
-        # 2) पीक ओळखलं पण आपल्या KB मध्ये specific माहिती नाही (उदा. आंबा) → best-effort उत्तर दे
-        # 3) पीक + KB दोन्ही सापडलं → verified उत्तर दे
-        is_ambiguous = (not specific_found) and (not unmapped_crops) and (not context.strip())
-
-        # टीप: हे 1 ओळीचं log — पुढच्या आठवड्यात keyword-matching किती वेळा चुकतंय ते
-        # प्रत्यक्ष मोजण्यासाठी. Render च्या Logs tab मध्ये "ROUTING_STATS" search कर —
-        # ambiguous किती % आहे ते बघून ठरव tool-calling कडे जायचं का.
-        route = "AMBIGUOUS" if is_ambiguous else ("UNMAPPED_CROP" if unmapped_crops else ("KB_HIT" if specific_found else "OTHER"))
+        # टीप: is_ambiguous case आधीच वर early-return झालेला असतो (LLM call ला पोहोचतच नाही),
+        # त्यामुळे इथे फक्त 2 केसेस उरतात: पीक ओळखलं पण KB मध्ये नाही (best-effort), किंवा
+        # पीक + KB दोन्ही सापडलं (verified).
+        route = "UNMAPPED_CROP" if unmapped_crops else ("KB_HIT" if specific_found else "OTHER")
         log.info(f"ROUTING_STATS | route={route} | q_words={len(question.split())} | crops={unmapped_crops or 'known'}")
 
-        if is_ambiguous:
-            user_content += (
-                "\n\n[सूचना: शेतकऱ्याचा प्रश्न खूप त्रोटक/अस्पष्ट आहे — कुठलं पीक, कुठला भाग "
-                "(पान/खोड/फळ/मूळ), काय लक्षण याबद्दल काहीच स्पष्ट नाही. अंदाजाने उत्तर देऊ नकोस — "
-                "त्याला थोडक्यात, नैसर्गिक भाषेत विचार की नेमकं काय विचारायचंय (उदा. 'कोणत्या पिकाला "
-                "समस्या आहे आणि नक्की काय दिसतंय — पान पिवळी, डाग, किडे?'). एकाच वेळी एकच प्रश्न विचार. "
-                "अचूकता टॅग लिहू नकोस — अजून उत्तरच दिलेलं नाहीये.]"
-            )
-        elif not specific_found:
+        if not specific_found:
             user_content += (
                 "\n\n[सूचना: वरील संदर्भात या प्रश्नाचं exact answer नाही. तरी तुझ्या स्वतःच्या "
                 "कृषी ज्ञानाने प्रामाणिक, practical उत्तर दे — टाळू नकोस किंवा फक्त 'कृषी केंद्राला विचारा' "
