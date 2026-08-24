@@ -120,12 +120,17 @@ CROP_EMOJI = {
 
 async def get_mandi_prices(district: str = "Pune", crop: str = None, crops: list = None) -> str:
     today = date.today().strftime("%d-%b-%Y")
+    used_default = False
     if crops:
         crop_names = list(dict.fromkeys([CROP_MAP.get(c.lower(), c.capitalize()) for c in crops]))
     elif crop:
         crop_names = [CROP_MAP.get(crop.lower(), crop.capitalize())]
     else:
-        crop_names = ["Onion", "Tomato"]
+        # टीप: farmer ने कुठलंच पीक सांगितलेलं नाही (ना संदेशात, ना नोंदणीत) — म्हणून हे
+        # ONION/TOMATO फक्त "त्याचंच पीक आहे" असं गृहीत धरून दाखवत नाही; हे काही सामान्य/जास्त
+        # व्यापार होणारी पिकं आहेत हे उत्तरात स्पष्ट सांगतो (खाली used_default फ्लॅगने).
+        crop_names = ["Onion", "Tomato", "Wheat"]
+        used_default = True
     district_lower = district.lower()
     markets = DISTRICT_MARKETS.get(district_lower, [district])
     all_prices = []
@@ -166,7 +171,7 @@ async def get_mandi_prices(district: str = "Pune", crop: str = None, crops: list
 
     if all_prices:
         await _store(all_prices, district)
-        return _fmt(all_prices, today, district)
+        return _fmt(all_prices, today, district, used_default)
 
     return _fallback(today, district)
 
@@ -290,7 +295,7 @@ async def get_trend_line(commodity: str, district: str = "Pune") -> str:
         log.warning(f"Trend line: {e}")
         return ""
 
-def _fmt(prices: list, date_str: str, district: str) -> str:
+def _fmt(prices: list, date_str: str, district: str, used_default: bool = False) -> str:
     lines = [f"📊 *{district} मंडई भाव — {date_str}*\n"]
     seen = set()
     for p in prices:
@@ -305,6 +310,10 @@ def _fmt(prices: list, date_str: str, district: str) -> str:
             f"*मोडल भाव: ₹{p.get('modal_price',0):.0f}*/क्विंटल {src}\n"
         )
     lines.append("━━━━━━━━━━━━")
+    if used_default:
+        # टीप: farmer ने पीक सांगितलेलं नव्हतं म्हणून हे काही सामान्य पिकांचे भाव आहेत —
+        # हे "तुमचंच पीक" असल्यासारखं वाटू नये म्हणून स्पष्ट सांगतो.
+        lines.append("_(तुम्ही पीक सांगितलं नाही म्हणून काही सामान्य पिकांचे भाव दाखवले — तुमच्या पिकाचं नाव पाठवा, नेमका भाव सांगतो)_")
     lines.append("_स्रोत: data.gov.in / Agmarknet_")
     return "\n".join(lines)
 
