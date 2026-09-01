@@ -1,51 +1,103 @@
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from app.services.database import get_farmer, create_farmer, log_conv, get_last_messages, update_farmer_location, update_farmer_crops
+from app.services.database import (get_farmer, create_farmer, log_conv, get_last_messages,
+    update_farmer_crops, update_farmer_state, update_farmer_district, update_farmer_taluka)
 from app.services.ai_service import farming_answer, disease_detect, voice_to_text, CROP_KEYWORDS, DISEASE_WORDS, FERTILIZER_WORDS
 from app.services.weather import get_weather
 from app.services.mandi import get_mandi_prices
 from app.services.whatsapp import get_media_url, download_media
+from app.data.maharashtra_locations import MAHARASHTRA_DISTRICTS, DIVISIONS, get_talukas
 
 log = logging.getLogger(__name__)
 
 FREE_NUMBERS = []
 
-DISTRICT_MARKETS = {
-    "pune":       {"lat": 18.5204, "lon": 73.8567, "markets": ["Pune", "Pimpri"]},
-    "nashik":     {"lat": 20.0059, "lon": 73.7897, "markets": ["Lasalgaon", "Pimpalgaon", "Ozar", "Rahuri"]},
-    "solapur":    {"lat": 17.6599, "lon": 75.9064, "markets": ["Solapur", "Pandharpur"]},
-    "ahmednagar": {"lat": 19.0948, "lon": 74.7480, "markets": ["Rahuri", "Shrirampur", "Ahmednagar"]},
-    "mumbai":     {"lat": 19.0760, "lon": 72.8777, "markets": ["Vashi"]},
-    "sangli":     {"lat": 16.8524, "lon": 74.5815, "markets": ["Sangli", "Miraj"]},
-    "satara":     {"lat": 17.6805, "lon": 74.0183, "markets": ["Satara", "Karad"]},
-    "kolhapur":   {"lat": 16.7050, "lon": 74.2433, "markets": ["Kolhapur"]},
-    "jalgaon":    {"lat": 21.0077, "lon": 75.5626, "markets": ["Jalgaon", "Bhusawal"]},
-    "aurangabad": {"lat": 19.8762, "lon": 75.3433, "markets": ["Aurangabad", "Lasur"]},
-    "latur":      {"lat": 18.4088, "lon": 76.5604, "markets": ["Latur", "Udgir"]},
-    "osmanabad":  {"lat": 18.1860, "lon": 76.0391, "markets": ["Osmanabad"]},
-    "nanded":     {"lat": 19.1383, "lon": 77.3210, "markets": ["Nanded", "Mudkhed"]},
-    "dhule":      {"lat": 20.9042, "lon": 74.7749, "markets": ["Dhule", "Shirpur"]},
-}
+# टीप: राज्य निवडायचा टप्पा — सध्या फक्त महाराष्ट्र आहे, पण रचना अशी आहे की भविष्यात
+# अजून राज्यं (उदा. कर्नाटक, गुजरात) सहज add करता येतील — फक्त list मध्ये एक ओळ वाढवायची.
+STATES = {"महाराष्ट्र": "Maharashtra"}
 
-DISTRICT_SELECT = """🌾 *KrishiMitra मध्ये आपले स्वागत आहे!*
+# जिल्ह्यांची क्रमवार यादी (विभागानुसार गटबद्ध, 1-36 सलग क्रमांक) — display आणि detection
+# दोन्हीसाठी वापरली जाते, जेणेकरून numbering कधीच विसंगत होणार नाही.
+def _build_district_order():
+    order = []
+    n = 1
+    for division, keys in DIVISIONS.items():
+        for k in keys:
+            name = MAHARASHTRA_DISTRICTS[k][0]
+            order.append((n, k, name, division))
+            n += 1
+    return order
 
-तुमचा जिल्हा सांगा — त्यानुसार हवामान व मंडई भाव मिळेल 👇
+DISTRICT_ORDER = _build_district_order()
 
-1️⃣ पुणे
-2️⃣ नाशिक
-3️⃣ सोलापूर
-4️⃣ अहमदनगर
-5️⃣ मुंबई / वाशी
-6️⃣ सांगली
-7️⃣ सातारा
-8️⃣ कोल्हापूर
-9️⃣ जळगाव
-🔟 औरंगाबाद
-1️⃣1️⃣ लातूर
-1️⃣2️⃣ नांदेड
+def _key_from_district_name(name: str) -> str:
+    """DB मध्ये district हा मराठी नावाने साठवलेला असतो — तालुका-यादी काढण्यासाठी परत key शोध"""
+    for key, (dname, _, _, _) in MAHARASHTRA_DISTRICTS.items():
+        if dname == name:
+            return key
+    return ""
 
-_किंवा तुमच्या जिल्ह्याचे नाव थेट लिहा_ 📝"""
+def _build_state_select() -> str:
+    return """🌾 *KrishiMitra मध्ये आपले स्वागत आहे!*
+
+आधी तुमचं राज्य सांगा 👇
+
+1️⃣ महाराष्ट्र
+
+_सध्या फक्त महाराष्ट्रासाठी सेवा उपलब्ध आहे — लवकरच इतर राज्यंही येतील_ 📝"""
+
+def _build_district_select() -> str:
+    lines = ["✅ *राज्य: महाराष्ट्र*\n\nआता तुमचा *जिल्हा* सांगा — नंबर पाठवा 👇"]
+    current_division = None
+    for n, key, name, division in DISTRICT_ORDER:
+        if division != current_division:
+            lines.append(f"\n*{division} विभाग:*")
+            current_division = division
+        lines.append(f"{n}. {name}")
+    lines.append("\n_जिल्ह्याचा नंबर पाठवा (उदा. 33 पुण्यासाठी)_ 📝")
+    return "\n".join(lines)
+
+def _build_taluka_select(district_key: str) -> str:
+    talukas = get_talukas(district_key)
+    district_name = MAHARASHTRA_DISTRICTS.get(district_key, ("",))[0]
+    lines = [f"✅ *जिल्हा: {district_name}*\n\nआता तुमचा *तालुका* सांगा — नंबर पाठवा 👇\n"]
+    for i, tal in enumerate(talukas, 1):
+        lines.append(f"{i}. {tal}")
+    lines.append("\n_तालुक्याचा नंबर पाठवा_ 📝")
+    return "\n".join(lines)
+
+def _detect_state(text: str) -> bool:
+    t = text.lower().strip()
+    return t in ["1", "maharashtra", "महाराष्ट्र", "mh", "maha"]
+
+def _detect_district(text: str) -> str:
+    """नंबर (1-36) किंवा जिल्ह्याचं नाव (मराठी/इंग्रजी key) — दोन्ही स्वीकारतो"""
+    t = text.lower().strip()
+    if t.isdigit():
+        n = int(t)
+        for num, key, name, division in DISTRICT_ORDER:
+            if num == n:
+                return key
+        return ""
+    for num, key, name, division in DISTRICT_ORDER:
+        if key in t or name in text:
+            return key
+    return ""
+
+def _detect_taluka(text: str, district_key: str) -> str:
+    """नंबर किंवा तालुक्याचं नाव — त्या specific जिल्ह्याच्या यादीतून"""
+    t = text.lower().strip()
+    talukas = get_talukas(district_key)
+    if t.isdigit():
+        n = int(t)
+        if 1 <= n <= len(talukas):
+            return talukas[n - 1]
+        return ""
+    for tal in talukas:
+        if tal in text:
+            return tal
+    return ""
 
 WELCOME = """🙏 *नमस्कार!*
 शेतीसंबंधित काहीही माहिती हवी असेल तर इथे विचारा 🌱
@@ -58,35 +110,6 @@ WELCOME = """🙏 *नमस्कार!*
 
 तुमचा प्रश्न पाठवा 😊
 _— KrishiMitra 🌾_"""
-
-DISTRICT_KEYWORDS = {
-    "pune":       ["pune", "पुणे", "1", "baramati", "बारामती", "indapur"],
-    "nashik":     ["nashik", "nasik", "नाशिक", "2", "malegaon"],
-    "solapur":    ["solapur", "सोलापूर", "3"],
-    "ahmednagar": ["ahmednagar", "nagar", "अहमदनगर", "4", "kopargaon", "संगमनेर", "sangamner"],
-    "mumbai":     ["mumbai", "vashi", "मुंबई", "वाशी", "5"],
-    "sangli":     ["sangli", "सांगली", "6"],
-    "satara":     ["satara", "सातारा", "7"],
-    "kolhapur":   ["kolhapur", "कोल्हापूर", "8"],
-    "jalgaon":    ["jalgaon", "जळगाव", "9"],
-    "aurangabad": ["aurangabad", "औरंगाबाद", "10", "chhatrapati sambhajinagar", "sambhajinagar", "छत्रपती संभाजीनगर"],
-    "latur":      ["latur", "लातूर", "11"],
-    "nanded":     ["nanded", "नांदेड", "12"],
-    "osmanabad":  ["osmanabad", "dharashiv", "धाराशिव"],
-}
-
-def _detect_district(text: str) -> str:
-    t = text.lower().strip()
-    # Pahile: exact number/word match (e.g. "10" != "1" cha substring)
-    for district, keywords in DISTRICT_KEYWORDS.items():
-        if t in keywords:
-            return district
-    # Fallback: partial/word match sirf non-numeric keywords sathi (names)
-    for district, keywords in DISTRICT_KEYWORDS.items():
-        for k in keywords:
-            if not k.isdigit() and k in t:
-                return district
-    return ""
 
 DATE_WORDS = [
     "tarikh", "tarikh kay", "आजची तारीख", "तारीख", "date today",
@@ -119,7 +142,7 @@ async def handle(phone: str, message: dict, msg_type: str) -> str:
 
     if not farmer:
         await create_farmer(phone)
-        return DISTRICT_SELECT
+        return _build_state_select()
 
     if not farmer.get("is_approved"):
         return "⏳ तुमची नोंदणी मंजूर होणे बाकी आहे.\nप्रशासकाकडून लवकरच मंजुरी मिळेल. धन्यवाद! 🙏"
@@ -127,21 +150,52 @@ async def handle(phone: str, message: dict, msg_type: str) -> str:
     if farmer.get("is_blocked"):
         return ""
 
-    # Fixed: clean check — location_set flag already tracks this
+    # टीप: 3-पायऱ्यांचा onboarding — राज्य → जिल्हा → तालुका. प्रत्येक पायरी क्रमाने,
+    # आधीची पूर्ण झाल्याशिवाय पुढची विचारली जात नाही. location_set फक्त तिन्ही पूर्ण
+    # झाल्यावरच True होतो (database.py च्या update_farmer_taluka मध्ये).
     if not farmer.get("location_set"):
-        if msg_type == "text":
-            text = message.get("text", {}).get("body", "").strip()
-            district = _detect_district(text)
-            if district:
-                info = DISTRICT_MARKETS[district]
-                await update_farmer_location(phone, district, info)
-                markets = ", ".join(info["markets"])
-                return (f"✅ *{district.capitalize()} जिल्हा set झाला!*\n\n"
-                        f"📍 तुमच्या जवळच्या मंडया: *{markets}*\n\n"
-                        f"आता शेतीविषयक काहीही विचारा 🌾\n"
-                        f"_— KrishiMitra_ 🙏")
+        if msg_type != "text":
+            # Onboarding दरम्यान photo/voice आलं तर सध्याची पायरी परत दाखव
+            if not farmer.get("state"):
+                return _build_state_select()
+            elif not farmer.get("district"):
+                return _build_district_select()
             else:
-                return DISTRICT_SELECT
+                district_key = _key_from_district_name(farmer.get("district", ""))
+                return _build_taluka_select(district_key)
+
+        text = message.get("text", {}).get("body", "").strip()
+
+        # पायरी 1 — राज्य
+        if not farmer.get("state"):
+            if _detect_state(text):
+                await update_farmer_state(phone, "Maharashtra")
+                return _build_district_select()
+            return _build_state_select()
+
+        # पायरी 2 — जिल्हा
+        if not farmer.get("district"):
+            district_key = _detect_district(text)
+            if district_key:
+                district_name = MAHARASHTRA_DISTRICTS[district_key][0]
+                await update_farmer_district(phone, district_key, district_name)
+                return _build_taluka_select(district_key)
+            return _build_district_select()
+
+        # पायरी 3 — तालुका (शेवटची, यानंतर location_set = True)
+        district_key = _key_from_district_name(farmer.get("district", ""))
+        if not district_key:
+            # असामान्य स्थिती — district नाव जुळत नाही, सुरक्षिततेसाठी परत जिल्हा विचार
+            return _build_district_select()
+        taluka = _detect_taluka(text, district_key)
+        if taluka:
+            await update_farmer_taluka(phone, taluka)
+            district_name = farmer.get("district", "")
+            return (f"✅ *नोंदणी पूर्ण झाली!*\n\n"
+                    f"📍 जिल्हा: *{district_name}* | तालुका: *{taluka}*\n\n"
+                    f"आता शेतीविषयक काहीही विचारा 🌾\n"
+                    f"_— KrishiMitra_ 🙏")
+        return _build_taluka_select(district_key)
 
     return await _route(phone, message, msg_type, farmer)
 
