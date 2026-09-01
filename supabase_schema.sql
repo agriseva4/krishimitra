@@ -8,11 +8,13 @@ CREATE TABLE IF NOT EXISTS farmers (
     id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     phone       VARCHAR(20) UNIQUE NOT NULL,
     name        VARCHAR(100) DEFAULT 'Farmer',
-    district    VARCHAR(100) DEFAULT 'Pune',
+    state       VARCHAR(100) DEFAULT '',
+    district    VARCHAR(100) DEFAULT '',
+    taluka      VARCHAR(100) DEFAULT '',
     city        VARCHAR(100) DEFAULT 'Pune',
     lat         DECIMAL(10,6) DEFAULT 18.5204,
     lon         DECIMAL(10,6) DEFAULT 73.8567,
-    crops       TEXT[] DEFAULT ARRAY['onion','tomato'],
+    crops       TEXT[] DEFAULT ARRAY[]::TEXT[],
     language    VARCHAR(5) DEFAULT 'mr',
     is_approved BOOLEAN DEFAULT FALSE,
     is_free     BOOLEAN DEFAULT FALSE,
@@ -23,9 +25,15 @@ CREATE TABLE IF NOT EXISTS farmers (
 
 -- टीप: जर हा schema आधीच एकदा RUN केला असेल (म्हणजे table आधीच अस्तित्वात आहे),
 -- तर वरचा CREATE TABLE IF NOT EXISTS काहीच करणार नाही — त्यामुळे जुन्या table मध्ये
--- location_set column manually add करावा लागेल. हे safe आहे, आधीच column असेल तर
+-- खालचे columns manually add करावे लागतील. हे safe आहे, आधीच column असेल तर
 -- काहीच बदलणार नाही (IF NOT EXISTS मुळे):
 ALTER TABLE farmers ADD COLUMN IF NOT EXISTS location_set BOOLEAN DEFAULT FALSE;
+ALTER TABLE farmers ADD COLUMN IF NOT EXISTS state VARCHAR(100) DEFAULT '';
+ALTER TABLE farmers ADD COLUMN IF NOT EXISTS taluka VARCHAR(100) DEFAULT '';
+-- टीप: State→District→Taluka हा नवीन 3-पायरी onboarding flow आहे. जुन्या farmers
+-- ज्यांचा location_set=True आधीपासून आहे (जुना district-फक्त flow पूर्ण केलेला) — त्यांना
+-- परत taluka विचारायचा असेल तर त्यांचा location_set खाली FALSE कर (ऐच्छिक — जबरदस्ती नाही):
+-- UPDATE farmers SET location_set = FALSE WHERE taluka = '' AND location_set = TRUE;
 
 CREATE TABLE IF NOT EXISTS conversations (
     id              UUID DEFAULT gen_random_uuid() PRIMARY KEY,
