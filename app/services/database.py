@@ -38,7 +38,7 @@ async def create_farmer(phone: str):
             return
         db.table("farmers").insert({
             "phone": phone, "is_approved": False, "is_free": False,
-            "is_blocked": False, "district": "", "city": "",
+            "is_blocked": False, "state": "", "district": "", "taluka": "", "city": "",
             "lat": 18.5204, "lon": 73.8567,
             "crops": [], "language": "mr",
             "location_set": False
@@ -47,8 +47,47 @@ async def create_farmer(phone: str):
     except Exception as e:
         log.error(f"create_farmer: {e}")
 
+async def update_farmer_state(phone: str, state: str):
+    """पायरी 1 — राज्य निवडलं (सध्या फक्त Maharashtra)"""
+    try:
+        db = get_db()
+        if not db: return
+        db.table("farmers").update({"state": state}).eq("phone", phone).execute()
+        log.info(f"State updated: {phone} → {state}")
+    except Exception as e:
+        log.error(f"update_farmer_state: {e}")
+
+async def update_farmer_district(phone: str, district_key: str, district_name: str):
+    """पायरी 2 — जिल्हा निवडला (लगेच नंतर तालुका विचारला जाईल, location_set अजून True होत नाही)"""
+    try:
+        db = get_db()
+        if not db: return
+        from app.data.maharashtra_locations import get_district_coords
+        lat, lon = get_district_coords(district_key)
+        db.table("farmers").update({
+            "district": district_name, "city": district_name,
+            "lat": lat, "lon": lon,
+        }).eq("phone", phone).execute()
+        log.info(f"District updated: {phone} → {district_name}")
+    except Exception as e:
+        log.error(f"update_farmer_district: {e}")
+
+async def update_farmer_taluka(phone: str, taluka: str):
+    """पायरी 3 (शेवटची) — तालुका निवडला, आता location_set = True"""
+    try:
+        db = get_db()
+        if not db: return
+        db.table("farmers").update({
+            "taluka": taluka,
+            "location_set": True
+        }).eq("phone", phone).execute()
+        log.info(f"Taluka updated: {phone} → {taluka}")
+    except Exception as e:
+        log.error(f"update_farmer_taluka: {e}")
+
 async def update_farmer_location(phone: str, district: str, info: dict):
-    """District select kela tar location update kar"""
+    """टीप: जुना 1-पायरी location flow (backward-compat साठी ठेवलंय, आता वापरलं जात नाही —
+    नवीन 3-पायरी state→district→taluka flow message_handler.py मध्ये आहे)"""
     try:
         db = get_db()
         if not db: return
