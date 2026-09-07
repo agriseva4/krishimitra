@@ -120,17 +120,17 @@ CROP_EMOJI = {
 
 async def get_mandi_prices(district: str = "Pune", crop: str = None, crops: list = None) -> str:
     today = date.today().strftime("%d-%b-%Y")
-    used_default = False
     if crops:
         crop_names = list(dict.fromkeys([CROP_MAP.get(c.lower(), c.capitalize()) for c in crops]))
     elif crop:
         crop_names = [CROP_MAP.get(crop.lower(), crop.capitalize())]
     else:
-        # टीप: farmer ने कुठलंच पीक सांगितलेलं नाही (ना संदेशात, ना नोंदणीत) — म्हणून हे
-        # ONION/TOMATO फक्त "त्याचंच पीक आहे" असं गृहीत धरून दाखवत नाही; हे काही सामान्य/जास्त
-        # व्यापार होणारी पिकं आहेत हे उत्तरात स्पष्ट सांगतो (खाली used_default फ्लॅगने).
-        crop_names = ["Onion", "Tomato", "Wheat"]
-        used_default = True
+        # टीप: farmer ने कुठलंच पीक सांगितलेलं नाही (ना संदेशात, ना नोंदणीत) — पूर्वी इथे
+        # Onion/Tomato/Wheat दाखवलं जायचं (assumed default), जे शेतकऱ्याने विचारलंच नव्हतं.
+        # आता कधीच स्वतःहून अंदाज न घेता, थेट विचारतो — "जे विचारलं तेच उत्तर" हे तत्त्व.
+        return ("🌾 कोणत्या पिकाचा भाव हवाय? पिकाचं नाव पाठवा (उदा. \"[तुमचं पीक] भाव\")\n\n"
+                "_(तुमचं पीक एकदा सांगितलं की पुढच्या वेळी लगेच तेच दाखवीन)_")
+    used_default = False
     district_lower = district.lower()
     markets = DISTRICT_MARKETS.get(district_lower, [district])
     all_prices = []
