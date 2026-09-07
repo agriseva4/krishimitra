@@ -188,3 +188,24 @@ async def get_mandi_history(commodity: str, district: str, days: int = 7) -> lis
     except Exception as e:
         log.warning(f"get_mandi_history: {e}")
         return []
+
+async def try_claim_broadcast(broadcast_type: str) -> bool:
+    """आजचा broadcast (morning/daily_mandi/evening) पाठवायचा हक्क "claim" करतो.
+    Render वर deploy/restart दरम्यान क्षणभर 2 processes एकत्र चालू राहिल्यास, दोन्ही
+    आपापला scheduler घेऊन याच वेळी broadcast पाठवायचा प्रयत्न करतील — त्यामुळे farmer ला
+    duplicate messages जायचे. इथे Supabase च्या PRIMARY KEY (broadcast_type, date) मुळे
+    फक्त एकच process insert यशस्वी करू शकते — तीच पुढे जाऊन प्रत्यक्ष पाठवते, दुसरी आपोआप थांबते."""
+    try:
+        from datetime import date
+        db = get_db()
+        if not db: return True  # DB unavailable असेल तर जुनी पद्धत (पाठव, risk स्वीकार)
+        today = date.today().isoformat()
+        db.table("broadcast_log").insert({
+            "broadcast_type": broadcast_type,
+            "broadcast_date": today
+        }).execute()
+        return True  # insert यशस्वी — या process ने आजचा हक्क जिंकला
+    except Exception as e:
+        # Unique constraint violation म्हणजे दुसऱ्या process ने आधीच पाठवलंय — थांब
+        log.info(f"Broadcast '{broadcast_type}' आधीच claim झालाय आज, skip: {e}")
+        return False
