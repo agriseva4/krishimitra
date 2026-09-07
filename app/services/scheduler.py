@@ -46,9 +46,14 @@ async def daily_mandi():
     """Roj IST 8:30 la — pratyek farmer chya SWATA'chya crops sathi real mandi price + 7-din trend.
     Hardcoded Onion/Tomato nahi — farmer.crops database madhun vachun tyachyach pikanche bhav pathavto."""
     try:
-        from app.services.database import get_all_farmers
+        from app.services.database import get_all_farmers, try_claim_broadcast
         from app.services.mandi import get_mandi_prices, get_trend_line, CROP_MAP
         from app.services.whatsapp import send_message
+        # टीप: Render deploy/restart दरम्यान 2 processes क्षणभर एकत्र चालल्यास, दोन्ही हाच
+        # broadcast पाठवायचा प्रयत्न करू शकतात — यामुळे farmer ला duplicate messages जायचे.
+        # claim जिंकला नाही तर (म्हणजे दुसऱ्या process ने आधीच पाठवलंय) लगेच थांब.
+        if not await try_claim_broadcast("daily_mandi"):
+            return
         farmers = await get_all_farmers()
         log.info(f"Daily mandi batch: {len(farmers)} farmers")
         for f in farmers:
@@ -238,9 +243,11 @@ def _check_danger(data: dict, city: str) -> str:
 
 async def morning():
     try:
-        from app.services.database import get_all_farmers
+        from app.services.database import get_all_farmers, try_claim_broadcast
         from app.services.weather import get_weather
         from app.services.whatsapp import send_message
+        if not await try_claim_broadcast("morning"):
+            return
         farmers = await get_all_farmers()
         log.info(f"Morning batch: {len(farmers)} farmers")
         for f in farmers:
@@ -256,8 +263,10 @@ async def morning():
 
 async def evening():
     try:
-        from app.services.database import get_all_farmers
+        from app.services.database import get_all_farmers, try_claim_broadcast
         from app.services.whatsapp import send_message
+        if not await try_claim_broadcast("evening"):
+            return
         farmers = await get_all_farmers()
         log.info(f"Evening batch: {len(farmers)} farmers")
         for f in farmers:
