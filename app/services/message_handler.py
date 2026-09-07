@@ -133,8 +133,10 @@ MANDI_WORDS = [
 
 async def handle(phone: str, message: dict, msg_type: str) -> str:
     if phone in FREE_NUMBERS:
+        # टीप: आधी इथे crops=["onion","tomato"] hardcoded होतं — testing/admin bypass
+        # असला तरी "कधीच अंदाज नको" या तत्त्वाला अपवाद नसावा, म्हणून रिकामं ठेवलं.
         farmer = {"phone": phone, "is_approved": True, "is_free": True,
-                  "crops": ["onion", "tomato"], "city": "Pune",
+                  "crops": [], "city": "Pune",
                   "district": "Pune", "lat": 18.5204, "lon": 73.8567}
         return await _route(phone, message, msg_type, farmer)
 
