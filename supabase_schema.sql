@@ -57,6 +57,17 @@ CREATE TABLE IF NOT EXISTS mandi_prices (
     UNIQUE(commodity, market, price_date)
 );
 
+-- टीप: हे table "double broadcast" bug साठी — Render restart/deploy दरम्यान क्षणभर 2
+-- processes एकत्र चालू राहू शकतात, प्रत्येकीचा स्वतःचा scheduler असतो. त्यामुळे रोजचा
+-- 7am/8:30am/6pm broadcast कधीकधी 2 वेळा जायचा. हे table एक "आजचा claim" ठेवतं —
+-- UNIQUE constraint मुळे फक्त पहिलीच process broadcast पाठवू शकते, दुसरी आपोआप थांबते.
+CREATE TABLE IF NOT EXISTS broadcast_log (
+    broadcast_type  VARCHAR(50) NOT NULL,
+    broadcast_date  DATE NOT NULL,
+    claimed_at      TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (broadcast_type, broadcast_date)
+);
+
 CREATE INDEX IF NOT EXISTS idx_farmers_phone    ON farmers(phone);
 CREATE INDEX IF NOT EXISTS idx_farmers_approved ON farmers(is_approved);
 CREATE INDEX IF NOT EXISTS idx_conv_phone       ON conversations(farmer_phone);
