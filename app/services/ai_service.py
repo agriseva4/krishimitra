@@ -662,14 +662,14 @@ async def _tavily_search(query: str) -> str:
         result = client.search(
             query=search_query,
             search_depth="basic",
-            max_results=2
+            max_results=3
         )
         items = result.get("results", [])
         if not items:
             return ""
         combined = "\n\n".join([
-            f"{item.get('title', '')}: {item.get('content', '')[:200]}"
-            for item in items[:2]
+            f"{item.get('title', '')}: {item.get('content', '')[:350]}"
+            for item in items[:3]
         ])
         log.info(f"Tavily search success: {search_query[:50]}")
         _tavily_cache[cache_key] = (time.time(), combined)
@@ -802,10 +802,10 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
         # टीप: Cerebras सध्या पूर्ण बंद केलंय (payment-required issue) — chain मधून काढलंय,
         # वेळ वाया जात नाही (आधी fail होऊन मग पुढच्याकडे जायला लागायचा वेळ आता वाचतो).
         # Gemini (primary, 250K TPM free) → Groq (fallback, 8K TPM free) — फक्त दोनच पुरेसे आहेत.
-        ans = await _gemini_call(messages, 250)
+        ans = await _gemini_call(messages, 300)
         if not ans:
             log.warning("Gemini failed → Groq fallback")
-            ans = await _groq_call(messages, 250)
+            ans = await _groq_call(messages, 300)
         if not ans:
             return "❌ थोडी अडचण आली. पुन्हा विचारा. 🙏"
 
