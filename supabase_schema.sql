@@ -68,6 +68,16 @@ CREATE TABLE IF NOT EXISTS broadcast_log (
     PRIMARY KEY (broadcast_type, broadcast_date)
 );
 
+-- टीप: हे table "same message twice process होणे" (double reply, district/taluka
+-- select पुन्हा-पुन्हा विचारणे) या bug साठी — आधी हा dedup फक्त process च्या memory मध्ये
+-- होता, जो Render restart/cold-start झाला की पुसला जायचा. आता Supabase मध्ये (शेअर्ड,
+-- कायमस्वरूपी) ठेवल्यामुळे process कितीही वेळा restart झाला तरी duplicate ओळखला जातो.
+CREATE TABLE IF NOT EXISTS processed_messages (
+    message_id   VARCHAR(100) PRIMARY KEY,
+    processed_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_processed_msgs_time ON processed_messages(processed_at);
+
 CREATE INDEX IF NOT EXISTS idx_farmers_phone    ON farmers(phone);
 CREATE INDEX IF NOT EXISTS idx_farmers_approved ON farmers(is_approved);
 CREATE INDEX IF NOT EXISTS idx_conv_phone       ON conversations(farmer_phone);
