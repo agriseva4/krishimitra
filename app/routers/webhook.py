@@ -4,24 +4,26 @@ from fastapi.responses import PlainTextResponse
 from app.config import META_VERIFY_TOKEN
 from app.services.message_handler import handle
 from app.services.whatsapp import send_message
+from app.services.database import try_claim_message
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhook", tags=["webhook"])
 
 # टीप: "double answer" bug चं खरं कारण — Render free-tier झोपलेली असताना (cold-start
 # 50+ सेकंद) WhatsApp चा webhook वेळेत उत्तर न मिळाल्याने तोच संदेश परत पाठवतो (retry).
-# आधी कुठलंच duplicate-check नव्हतं, त्यामुळे तोच संदेश 2 वेळा process व्हायचा, farmer ला
-# 2 उत्तरं जायची. आता प्रत्येक WhatsApp message ID (unique) आधी बघितलाय का ते तपासतो.
-# In-memory आहे (Render restart झाला की रिकामं होतं) — पण self-ping मुळे process सतत
-# जिवंत राहतो, त्यामुळे बहुतांश duplicate retries (जे सेकंदात/मिनिटांत येतात) पकडले जातील.
+# आधी इथे फक्त in-memory dict वापरून duplicate ओळखलं जायचं — पण तेच cold-start ज्यामुळे
+# retry येतो, तेच अनेकदा process restart सुद्धा घडवतं, आणि restart झाला की हा dict
+# रिकामा व्हायचा! त्यामुळे नेमकं ज्या वेळी duplicate detection सर्वात जास्त गरजेचं असतं
+# (cold-start नंतर), तेव्हाच ते अयशस्वी व्हायचं — district/taluka select सारखे टप्पे
+# त्यामुळे 2 वेळा process व्हायचे. आता in-memory (जलद, पहिला अडथळा) + Supabase-based
+# (खात्रीचा, process restart मध्येही टिकणारा) असे दोन्ही स्तर एकत्र वापरतो.
 _seen_message_ids: dict = {}
 _DEDUP_TTL = 600  # 10 मिनिटं — यापेक्षा जुनी entries आपोआप विसरली जातात
 
-def _is_duplicate(msg_id: str) -> bool:
+def _is_duplicate_in_memory(msg_id: str) -> bool:
     if not msg_id:
         return False
     now = time.time()
-    # जुनी entries साफ कर (memory unbounded वाढू नये म्हणून)
     if len(_seen_message_ids) > 2000:
         cutoff = now - _DEDUP_TTL
         for k in list(_seen_message_ids.keys()):
@@ -52,9 +54,18 @@ async def receive(request: Request, bg: BackgroundTasks):
         if not msgs: return {"status":"ok"}
         msg = msgs[0]
         msg_id = msg.get("id", "")
-        if _is_duplicate(msg_id):
-            log.info(f"Duplicate webhook skip: {msg_id}")
+
+        # पायरी 1 — जलद, in-memory check (बहुतांश duplicates लगेच पकडतो, DB call लागत नाही)
+        if _is_duplicate_in_memory(msg_id):
+            log.info(f"Duplicate webhook skip (memory): {msg_id}")
             return {"status":"ok"}
+
+        # पायरी 2 — खात्रीचा, Supabase-based check (process restart झाला तरी टिकतो —
+        # cold-start नंतरचे retries इथे पकडले जातात, जे in-memory check चुकवू शकतो)
+        if not await try_claim_message(msg_id):
+            log.info(f"Duplicate webhook skip (database): {msg_id}")
+            return {"status":"ok"}
+
         phone = msg.get("from","")
         mtype = msg.get("type","text")
         if phone: bg.add_task(_process, phone, msg, mtype)
