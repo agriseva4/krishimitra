@@ -209,3 +209,22 @@ async def try_claim_broadcast(broadcast_type: str) -> bool:
         # Unique constraint violation म्हणजे दुसऱ्या process ने आधीच पाठवलंय — थांब
         log.info(f"Broadcast '{broadcast_type}' आधीच claim झालाय आज, skip: {e}")
         return False
+
+async def try_claim_message(message_id: str) -> bool:
+    """WhatsApp कडून येणारा प्रत्येक incoming message एकदाच process व्हावा यासाठी.
+    टीप: आधी हा check फक्त process च्या memory मध्ये (dict) होता — Render restart/cold-start
+    झाला की तो dict रिकामा व्हायचा, आणि नेमकं तेव्हाच (cold-start मुळे उशीर झाल्याने) WhatsApp
+    चा retry यायचा — त्यामुळे duplicate ओळखलाच जायचा नाही. आता Supabase (शेअर्ड, कायमस्वरूपी)
+    मध्ये ठेवल्यामुळे process कितीही वेळा restart झाला तरी अचूक ओळखलं जातं.
+    Returns True तरच पुढे process कर — False असेल तर हा संदेश आधीच हाताळलेला आहे, skip कर."""
+    if not message_id:
+        return True  # message_id नसेल तर (क्वचित घडतं) जुनी पद्धत — process कर
+    try:
+        db = get_db()
+        if not db: return True  # DB unavailable असेल तर जुनी पद्धत (process कर, risk स्वीकार)
+        db.table("processed_messages").insert({"message_id": message_id}).execute()
+        return True  # insert यशस्वी — पहिल्यांदाच आलेला संदेश
+    except Exception as e:
+        # Unique constraint violation म्हणजे हा message_id आधीच process झालाय — duplicate!
+        log.info(f"Duplicate message (DB-level) skip: {message_id}")
+        return False
