@@ -299,14 +299,14 @@ async def _audio(msg: dict, farmer: dict) -> str:
         if not transcribed:
             return ("🎤 *व्हॉइस ऐकला, पण नीट समजला नाही.*\n\n"
                     "कृपया:\n• स्पष्टपणे बोला\n"
-                    "• शांत ठिकाणी record करा\n"
+                    "• शांत ठिकाणी बोलून पाठवा\n"
                     "• किंवा टेक्स्ट मध्ये लिहा 📝")
         history = await get_last_messages(phone, limit=6)
         answer = await farming_answer(transcribed, farmer, history)
         return f"🎤 *तुम्ही म्हणालात:* _{transcribed}_\n\n{answer}"
     except Exception as e:
         log.error(f"Audio error: {e}")
-        return "❌ *व्हॉइस process करता आला नाही.*\nटेक्स्ट मध्ये विचारा. 🙏"
+        return "❌ *व्हॉइस समजला नाही.*\nटेक्स्ट मध्ये विचारा. 🙏"
 
 async def _image(img_id, caption, farmer):
     if not img_id: return "❌ *फोटो मिळाला नाही.*\nकृपया पुन्हा पाठवा. 📸"
