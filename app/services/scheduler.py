@@ -1,5 +1,5 @@
 import logging, asyncio, os
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -99,49 +99,44 @@ async def daily_mandi():
         log.error(f"daily_mandi batch: {e}")
 
 async def weather_alert_check():
+    """दर तासाला धोकादायक हवामान तपासतो.
+    टीप: (1) आधी farmer-प्रति API call व्हायचा — आता जागेनुसार (lat/lon) गट करून एकच call,
+    (2) आधी तोच alert दर तासाला जायचा — आता प्रत्येक जागेसाठी दिवसातून एकदाच (broadcast_log claim)."""
     try:
-        from app.services.database import get_all_farmers
+        from app.services.database import get_all_farmers, try_claim_broadcast
         from app.services.whatsapp import send_message
         import httpx
         from app.config import OPENWEATHER_API_KEY
 
+        if not OPENWEATHER_API_KEY:
+            return
         farmers = await get_all_farmers()
         if not farmers: return
 
-        alerted_locations = set()
-
+        groups = {}
         for f in farmers:
+            lat = f.get("lat") or 18.5204
+            lon = f.get("lon") or 73.8567
+            key = f"{round(float(lat),1)}_{round(float(lon),1)}"
+            g = groups.setdefault(key, {"lat": lat, "lon": lon, "city": f.get("city") or "Pune", "phones": []})
+            g["phones"].append(f["phone"])
+
+        for key, g in groups.items():
             try:
-                lat = f.get("lat", 18.5204)
-                lon = f.get("lon", 73.8567)
-                city = f.get("city", "Pune")
-                loc_key = f"{round(lat,1)}_{round(lon,1)}"
-
-                if loc_key in alerted_locations:
-                    continue
-
-                url = f"https://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={OPENWEATHER_API_KEY}&units=metric&cnt=3"
-
+                url = (f"https://api.openweathermap.org/data/2.5/forecast?lat={g['lat']}&lon={g['lon']}"
+                       f"&appid={OPENWEATHER_API_KEY}&units=metric&cnt=3")
                 async with httpx.AsyncClient(timeout=10) as c:
                     r = await c.get(url)
-                    if r.status_code != 200:
-                        continue
-                    data = r.json()
-
-                alert_msg = _check_danger(data, city)
-
-                if alert_msg:
-                    alerted_locations.add(loc_key)
-                    for farmer in farmers:
-                        floc = f"{round(farmer.get('lat',18.5204),1)}_{round(farmer.get('lon',73.8567),1)}"
-                        if floc == loc_key:
-                            await send_message(farmer["phone"], alert_msg)
-                            await asyncio.sleep(0.5)
-
+                if r.status_code != 200:
+                    continue
+                alert_msg = _check_danger(r.json(), g["city"])
+                if alert_msg and await try_claim_broadcast(f"wx_{key}"):
+                    for phone in g["phones"]:
+                        await send_message(phone, alert_msg)
+                        await asyncio.sleep(0.5)
                 await asyncio.sleep(0.3)
-
             except Exception as e:
-                log.warning(f"Alert check {f.get('phone')}: {e}")
+                log.warning(f"Alert check {key}: {e}")
 
     except Exception as e:
         log.error(f"weather_alert_check: {e}")
@@ -184,9 +179,10 @@ def _check_danger(data: dict, city: str) -> str:
         if not any([thunderstorm, heavy_rain, strong_wind, heat_wave]):
             return ""
 
-        now = datetime.now()
-        t1 = f"{now.hour + 1}:{now.minute:02d}"
-        t2 = f"{now.hour + 3}:{now.minute:02d}"
+        # टीप: Render UTC वर चालतो — वेळ IST मध्ये दाखव, आणि 24 तास ओलांडल्यावरही बरोबर ("26:00" नाही)
+        now = datetime.now(IST)
+        t1 = (now + timedelta(hours=1)).strftime("%H:%M")
+        t2 = (now + timedelta(hours=3)).strftime("%H:%M")
 
         if thunderstorm:
             icon = "⛈️"
