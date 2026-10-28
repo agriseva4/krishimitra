@@ -1,9 +1,9 @@
-import logging
+import logging, os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from app.services.database import (get_farmer, create_farmer, log_conv, get_last_messages,
     update_farmer_crops, update_farmer_state, update_farmer_district, update_farmer_taluka)
-from app.services.ai_service import farming_answer, disease_detect, voice_to_text, CROP_KEYWORDS, DISEASE_WORDS, FERTILIZER_WORDS
+from app.services.ai_service import farming_answer, disease_detect, voice_to_text, CROP_KEYWORDS, DISEASE_WORDS, FERTILIZER_WORDS, any_kw
 from app.services.weather import get_weather
 from app.services.mandi import get_mandi_prices
 from app.services.whatsapp import get_media_url, download_media
@@ -12,6 +12,26 @@ from app.data.maharashtra_locations import MAHARASHTRA_DISTRICTS, DIVISIONS, get
 log = logging.getLogger(__name__)
 
 FREE_NUMBERS = []
+
+# ── 👍/👎 feedback — कधी विचारायचं ───────────────────────────────────────────
+# AI च्या उत्तरानंतर (हवामान/भाव/तारीख नाही) बटणं पाठवतो. प्रत्येक वेळी विचारलं तर शेतकरी वैतागेल,
+# म्हणून FEEDBACK_EVERY_N (default 2) = प्रत्येक दुसऱ्या AI-उत्तरानंतर; फोटो-निदानानंतर नेहमी.
+FEEDBACK_EVERY_N = max(1, int(os.getenv("FEEDBACK_EVERY_N", "2")))
+_fb_wanted = set()
+_fb_counter = {}
+
+def _mark_feedback(phone: str, always: bool = False):
+    n = _fb_counter.get(phone, 0) + 1
+    _fb_counter[phone] = n
+    if always or n % FEEDBACK_EVERY_N == 0:
+        _fb_wanted.add(phone)
+
+def pop_feedback_flag(phone: str) -> bool:
+    """webhook उत्तर पाठवल्यावर हे विचारतो — True असेल तर 👍/👎 बटणं पाठवा."""
+    if phone in _fb_wanted:
+        _fb_wanted.discard(phone)
+        return True
+    return False
 
 # टीप: राज्य निवडायचा टप्पा — सध्या फक्त महाराष्ट्र आहे, पण रचना अशी आहे की भविष्यात
 # अजून राज्यं (उदा. कर्नाटक, गुजरात) सहज add करता येतील — फक्त list मध्ये एक ओळ वाढवायची.
@@ -55,7 +75,10 @@ def _build_district_select() -> str:
             lines.append(f"\n*{division} विभाग:*")
             current_division = division
         lines.append(f"{n}. {name}")
-    lines.append("\n_जिल्ह्याचा नंबर पाठवा (उदा. 33 पुण्यासाठी)_ 📝")
+    # टीप: आधी इथे "उदा. 33 पुण्यासाठी" हार्डकोड होतं — पण 33 म्हणजे भंडारा! (पुणे = 13).
+    # आता उदाहरणातला नंबर यादीतूनच आपोआप काढतो, त्यामुळे यादी बदलली तरी चुकणार नाही.
+    pune_n = next((n for n, k, _nm, _dv in DISTRICT_ORDER if k == "pune"), 1)
+    lines.append(f"\n_जिल्ह्याचा नंबर पाठवा (उदा. {pune_n} पुण्यासाठी)_ 📝")
     return "\n".join(lines)
 
 def _build_taluka_select(district_key: str) -> str:
@@ -144,7 +167,9 @@ async def handle(phone: str, message: dict, msg_type: str) -> str:
 
     if not farmer:
         await create_farmer(phone)
-        return _build_state_select()
+        return ("🙏 *नमस्कार! KrishiMitra मध्ये आपले स्वागत आहे.*\n\n"
+                "तुमची नोंदणी मिळाली आहे ✅\n"
+                "⏳ मंजुरी मिळताच आम्ही तुम्हाला इथेच कळवू. धन्यवाद! 🌾")
 
     if not farmer.get("is_approved"):
         return "⏳ तुमची नोंदणी मंजूर होणे बाकी आहे.\nप्रशासकाकडून लवकरच मंजुरी मिळेल. धन्यवाद! 🙏"
@@ -176,19 +201,18 @@ async def handle(phone: str, message: dict, msg_type: str) -> str:
             return _build_state_select()
 
         # पायरी 2 — जिल्हा
-        if not farmer.get("district"):
-            district_key = _detect_district(text)
-            if district_key:
-                district_name = MAHARASHTRA_DISTRICTS[district_key][0]
-                await update_farmer_district(phone, district_key, district_name)
-                return _build_taluka_select(district_key)
+        district_key = _key_from_district_name(farmer.get("district", ""))
+        if not district_key:
+            # district रिकामा आहे, किंवा त्यात मराठी नावाशी न जुळणारं काही आहे (उदा. SQL/admin ने
+            # इंग्रजीत "Pune" भरलेलं) — दोन्ही केसमध्ये परत निवडायला लाव. (आधी इथे अनंत loop व्हायचा.)
+            picked = _detect_district(text)
+            if picked:
+                district_name = MAHARASHTRA_DISTRICTS[picked][0]
+                await update_farmer_district(phone, picked, district_name)
+                return _build_taluka_select(picked)
             return _build_district_select()
 
         # पायरी 3 — तालुका (शेवटची, यानंतर location_set = True)
-        district_key = _key_from_district_name(farmer.get("district", ""))
-        if not district_key:
-            # असामान्य स्थिती — district नाव जुळत नाही, सुरक्षिततेसाठी परत जिल्हा विचार
-            return _build_district_select()
         taluka = _detect_taluka(text, district_key)
         if taluka:
             await update_farmer_taluka(phone, taluka)
@@ -213,10 +237,12 @@ async def _route(phone, msg, mtype, farmer):
             img_id = msg.get("image", {}).get("id", "")
             caption = msg.get("image", {}).get("caption", "")
             resp = await _image(img_id, caption, farmer)
+            if resp and not resp.startswith("❌"):
+                _mark_feedback(phone, always=True)
             await log_conv(phone, f"[IMAGE]{caption}", resp, "image")
             return resp
         elif mtype in ["audio", "voice"]:
-            resp = await _audio(msg, farmer)
+            resp = await _audio(phone, msg, farmer)
             await log_conv(phone, "[VOICE]", resp, "audio")
             return resp
         return WELCOME
@@ -232,7 +258,7 @@ def _scan_new_crops(text: str, existing_crops: list) -> list:
     for crop, keywords in CROP_KEYWORDS.items():
         if crop in existing_lower:
             continue
-        if any(k in t for k in keywords):
+        if any_kw(keywords, t):
             new_found.append(crop)
     return new_found
 
@@ -242,7 +268,7 @@ async def _text(phone: str, text: str, farmer: dict) -> str:
     if t in ["hi", "hello", "hey", "helo", "hii", "नमस्कार", "namaskar", "hy", "hye", "start"]:
         return WELCOME
 
-    if any(w in t for w in DATE_WORDS):
+    if any_kw(DATE_WORDS, t):
         months_mr = ["", "जानेवारी", "फेब्रुवारी", "मार्च", "एप्रिल", "मे", "जून",
                      "जुलै", "ऑगस्ट", "सप्टेंबर", "ऑक्टोबर", "नोव्हेंबर", "डिसेंबर"]
         now = datetime.now(ZoneInfo("Asia/Kolkata"))
@@ -250,9 +276,9 @@ async def _text(phone: str, text: str, farmer: dict) -> str:
 
     # टीप: DISEASE_WORDS/FERTILIZER_WORDS असतील तर हवामान shortcut ने hijack करायचं नाही —
     # "थंडीमुळे पान सुकतंय" सारखा प्रश्न disease-सल्ला हवा असतो, नुसता hवामान अंदाज नाही.
-    _early_disease_fert_check = any(w in t for w in DISEASE_WORDS) or any(w in t for w in FERTILIZER_WORDS)
+    _early_disease_fert_check = any_kw(DISEASE_WORDS, t) or any_kw(FERTILIZER_WORDS, t)
 
-    if any(w in t for w in WEATHER_WORDS) and not _early_disease_fert_check:
+    if any_kw(WEATHER_WORDS, t) and not _early_disease_fert_check:
         return await get_weather(
             farmer.get("lat", 18.5204),
             farmer.get("lon", 73.8567),
@@ -262,7 +288,7 @@ async def _text(phone: str, text: str, farmer: dict) -> str:
     # टीप: DISEASE_WORDS/FERTILIZER_WORDS असतील तर हे मंडई-भाव पेक्षा जास्त तातडीचं आहे —
     # farmer ला रोग/खताचा प्रश्न असेल तर price shortcut ने तो hijack करायचा नाही, नाहीतर
     # "कांद्याला रोग आलाय" सारखा तातडीचा प्रश्न चुकून फक्त भाव दाखवून थांबायचा.
-    if any(w in t for w in MANDI_WORDS) and not _early_disease_fert_check:
+    if any_kw(MANDI_WORDS, t) and not _early_disease_fert_check:
         district = farmer.get("district", "Pune")
         # टीप: आधी farmer चे स्वतःचे crops कधीच पाठवले जात नव्हते — नेहमी mandi.py चा
         # default (onion/tomato) दाखवला जायचा, farmer प्रत्यक्षात काहीही पिकवत असला तरी.
@@ -281,9 +307,12 @@ async def _text(phone: str, text: str, farmer: dict) -> str:
         farmer["crops"] = updated_crops  # current request sathi pan update kar
 
     history = await get_last_messages(phone, limit=6)
-    return await farming_answer(text, farmer, history)
+    ans = await farming_answer(text, farmer, history)
+    if ans and not ans.startswith("❌"):
+        _mark_feedback(phone)
+    return ans
 
-async def _audio(msg: dict, farmer: dict) -> str:
+async def _audio(phone: str, msg: dict, farmer: dict) -> str:
     try:
         audio_data = msg.get("audio") or msg.get("voice") or {}
         audio_id = audio_data.get("id", "")
@@ -303,6 +332,8 @@ async def _audio(msg: dict, farmer: dict) -> str:
                     "• किंवा टेक्स्ट मध्ये लिहा 📝")
         history = await get_last_messages(phone, limit=6)
         answer = await farming_answer(transcribed, farmer, history)
+        if answer and not answer.startswith("❌"):
+            _mark_feedback(phone)
         return f"🎤 *तुम्ही म्हणालात:* _{transcribed}_\n\n{answer}"
     except Exception as e:
         log.error(f"Audio error: {e}")
