@@ -90,3 +90,33 @@ async def send_audio_message(to: str, audio_bytes: bytes) -> bool:
     except Exception as e:
         log.error(f"send_audio_message: {e}")
         return False
+
+async def send_buttons(to: str, body: str, buttons: list) -> bool:
+    """WhatsApp 'reply buttons' (जास्तीत जास्त 3). buttons = [(id, title), ...] — title 20 अक्षरांपर्यंत.
+    टीप: हा template नाही — farmer ने शेवटचा message 24 तासांच्या आत पाठवला असेल तेव्हाच चालतो
+    (आपण उत्तरानंतरच पाठवतो, त्यामुळे ठीक)."""
+    if not META_ACCESS_TOKEN or not META_PHONE_NUMBER_ID or not buttons:
+        return False
+    try:
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to, "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {"text": body[:1024]},
+                "action": {"buttons": [
+                    {"type": "reply", "reply": {"id": bid, "title": title[:20]}}
+                    for bid, title in buttons[:3]
+                ]},
+            },
+        }
+        async with httpx.AsyncClient(timeout=TO) as c:
+            r = await c.post(_url(), json=payload, headers=_hdr())
+            if r.status_code != 200:
+                log.error(f"WA buttons [{r.status_code}]: {r.text[:120]}")
+                return False
+            return True
+    except Exception as e:
+        log.error(f"send_buttons: {e}")
+        return False
