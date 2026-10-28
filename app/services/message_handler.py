@@ -2,16 +2,44 @@ import logging, os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from app.services.database import (get_farmer, create_farmer, log_conv, get_last_messages,
-    update_farmer_crops, update_farmer_state, update_farmer_district, update_farmer_taluka)
+    update_farmer_crops, update_farmer_state, update_farmer_district, update_farmer_taluka, set_opt_out)
 from app.services.ai_service import farming_answer, disease_detect, voice_to_text, CROP_KEYWORDS, DISEASE_WORDS, FERTILIZER_WORDS, any_kw
 from app.services.weather import get_weather
 from app.services.mandi import get_mandi_prices
-from app.services.whatsapp import get_media_url, download_media
+from app.services.whatsapp import get_media_url, download_media, was_nudged_recently, clear_nudge
+from app.services.digest import build_daily_digest
 from app.data.maharashtra_locations import MAHARASHTRA_DISTRICTS, DIVISIONS, get_talukas
 
 log = logging.getLogger(__name__)
 
 FREE_NUMBERS = []
+
+# ── बंद / चालू (opt-out) ────────────────────────────────────────────────────
+# फक्त संपूर्ण message हाच शब्द असेल तरच — "पंप बंद पडला" सारख्या प्रश्नाने चुकून बंद होऊ नये.
+STOP_WORDS = {"stop", "बंद", "बंद करा", "थांबवा", "थांबा", "unsubscribe", "band", "band kara"}
+START_WORDS = {"चालू", "चालू करा", "सुरू", "सुरू करा", "subscribe", "resume", "chalu", "chalu kara"}
+YES_WORDS = {"हो", "होय", "हा", "ho", "hoy", "ha", "yes", "ok", "ओके"}
+PRIVACY_URL = os.getenv("PRIVACY_URL", "")
+
+CONSENT_LINE = ("🔒 आम्ही तुमचा नंबर, पिकं आणि प्रश्न सेवा देण्यासाठी आणि सुधारण्यासाठी साठवतो. "
+                "रोजचे संदेश थांबवायला कधीही *बंद* लिहा."
+                + (f"\nगोपनीयता: {PRIVACY_URL}" if PRIVACY_URL else ""))
+
+# ── दिवसाची message मर्यादा (खर्च/दुरुपयोग नियंत्रण) ────────────────────────────
+DAILY_MSG_LIMIT = max(5, int(os.getenv("DAILY_MSG_LIMIT", "60")))
+_daily = {}   # phone -> (IST तारीख, count)
+
+def _rate_check(phone: str) -> str:
+    """"ok" | "first_block" (आजची पहिली अडवणूक — संदेश पाठव) | "blocked" (आधीच सांगितलंय — गप्प रहा)"""
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    d, n = _daily.get(phone, (today, 0))
+    if d != today:
+        d, n = today, 0
+    n += 1
+    _daily[phone] = (d, n)
+    if n <= DAILY_MSG_LIMIT:
+        return "ok"
+    return "first_block" if n == DAILY_MSG_LIMIT + 1 else "blocked"
 
 # ── 👍/👎 feedback — कधी विचारायचं ───────────────────────────────────────────
 # AI च्या उत्तरानंतर (हवामान/भाव/तारीख नाही) बटणं पाठवतो. प्रत्येक वेळी विचारलं तर शेतकरी वैतागेल,
@@ -169,12 +197,33 @@ async def handle(phone: str, message: dict, msg_type: str) -> str:
         await create_farmer(phone)
         return ("🙏 *नमस्कार! KrishiMitra मध्ये आपले स्वागत आहे.*\n\n"
                 "तुमची नोंदणी मिळाली आहे ✅\n"
-                "⏳ मंजुरी मिळताच आम्ही तुम्हाला इथेच कळवू. धन्यवाद! 🌾")
+                "⏳ मंजुरी मिळताच आम्ही तुम्हाला इथेच कळवू. धन्यवाद! 🌾\n\n" + CONSENT_LINE)
 
     if not farmer.get("is_approved"):
         return "⏳ तुमची नोंदणी मंजूर होणे बाकी आहे.\nप्रशासकाकडून लवकरच मंजुरी मिळेल. धन्यवाद! 🙏"
 
     if farmer.get("is_blocked"):
+        return ""
+
+    # बंद / चालू — संपूर्ण message तेवढंच असेल तर (onboarding पूर्ण नसतानाही चालतं)
+    if msg_type == "text":
+        _cmd = message.get("text", {}).get("body", "").strip().lower()
+        if _cmd in STOP_WORDS:
+            ok = await set_opt_out(phone, True)
+            return ("✅ ठीक आहे, रोजचे संदेश (हवामान/भाव/सल्ला) बंद केले. 🙏\n"
+                    "तुम्ही प्रश्न विचारू शकता — उत्तर मिळत राहील.\n"
+                    "पुन्हा चालू करायला *चालू* लिहा." if ok else
+                    "⚠️ तांत्रिक अडचण आली, कृपया थोड्या वेळाने पुन्हा *बंद* लिहा.")
+        if _cmd in START_WORDS:
+            ok = await set_opt_out(phone, False)
+            return ("✅ रोजचे संदेश पुन्हा चालू केले. 🌾 थांबवायला *बंद* लिहा." if ok else
+                    "⚠️ तांत्रिक अडचण आली, कृपया थोड्या वेळाने पुन्हा *चालू* लिहा.")
+
+    _rl = _rate_check(phone)
+    if _rl == "first_block":
+        return ("🙏 आजची प्रश्नांची मर्यादा संपली आहे. उद्या पुन्हा विचारा.\n"
+                "तातडीच्या मदतीसाठी 📞 1800-180-1551 (मोफत) वर संपर्क करा.")
+    if _rl == "blocked":
         return ""
 
     # टीप: 3-पायऱ्यांचा onboarding — राज्य → जिल्हा → तालुका. प्रत्येक पायरी क्रमाने,
@@ -264,6 +313,12 @@ def _scan_new_crops(text: str, existing_crops: list) -> list:
 
 async def _text(phone: str, text: str, farmer: dict) -> str:
     t = text.lower().strip()
+
+    # nudge template ला शेतकऱ्याने "हो" म्हटलं — आता 24-तास window उघडलीय, आजचं हवामान+भाव पाठव.
+    # (फक्त nudge नंतरच; onboarding पूर्ण नसेल तर "हो" सामान्य flow कडेच जातं.)
+    if t in YES_WORDS and farmer.get("location_set") and was_nudged_recently(phone):
+        clear_nudge(phone)
+        return await build_daily_digest(farmer)
 
     if t in ["hi", "hello", "hey", "helo", "hii", "नमस्कार", "namaskar", "hy", "hye", "start"]:
         return WELCOME
