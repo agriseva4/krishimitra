@@ -1,4 +1,5 @@
 import logging
+import os
 import random
 import re
 import httpx
@@ -12,8 +13,54 @@ GROQ_URL       = "https://api.groq.com/openai/v1/chat/completions"
 # tokens/minute, ani Marathi sathi खूप जास्त अचूक. Card lagत nahi.
 # टीप: Cerebras (payment-required issue मुळे) पूर्णपणे काढून टाकलाय — फक्त Gemini + Groq वापरतोय.
 GEMINI_URL     = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-GROQ_MODEL     = "openai/gpt-oss-120b"
-GEMINI_MODEL   = "gemini-2.5-flash-lite"
+GROQ_MODEL     = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+# टीप: Model नावं Render env मध्ये ठेवली — Google/Groq model बंद केलं तरी code बदलावा लागत नाही.
+GEMINI_MODEL   = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+GROQ_VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
+
+# ── Keyword matching (शब्द-सीमा सह) ─────────────────────────────────────────
+# आधी `kw in text` (substring) वापरायचो — त्यामुळे "paus" मध्ये "us" (ऊस), "until" मध्ये "til" (तीळ)
+# सापडायचं आणि चुकीचं पीक farmer.crops मध्ये save व्हायचं. आता इंग्रजी-अक्षरी लहान शब्दांसाठी
+# डावीकडची शब्द-सीमा तपासतो (उजवीकडे मराठी प्रत्यय — "rogacha", "kandyala" — चालू देतो).
+_LATIN_KW = re.compile(r"^[a-z ]+$")
+
+def kw_in(text: str, kw: str) -> bool:
+    kw = kw.lower()
+    if not _LATIN_KW.match(kw) or len(kw) > 4:
+        return kw in text
+    pat = r"(?<![a-z])" + re.escape(kw) + (r"(?![a-z])" if len(kw) <= 2 else "")
+    return re.search(pat, text) is not None
+
+def any_kw(words, text: str) -> bool:
+    return any(kw_in(text, w) for w in words)
+
+# ── औषधाचं प्रमाण (dose) सुरक्षा-कवच ─────────────────────────────────────────
+# टीप: पडताळलेली KB (पीक-विशिष्ट रोग माहिती) नसेल तेव्हा — म्हणजे आंबा, हळद, ज्वारी यांसारख्या पिकांसाठी,
+# किंवा फक्त इंटरनेट/मॉडेलच्या स्वतःच्या ज्ञानावरून उत्तर देताना — औषधाचा dose सांगायचा नाही.
+# चुकीचा dose = पीक जळणं / आरोग्य धोका. Prompt मध्ये सांगूनही model कधीकधी आकडे देतो,
+# म्हणून उत्तर आल्यावर code-स्तरावर तशा ओळी काढून टाकतो (दुहेरी सुरक्षा).
+_DIG = "0-9०-९"
+_DOSE_UNIT_RE = re.compile(
+    rf"[{_DIG}][{_DIG}.,/]*\s*(?:ml|मिली|मि\.\s?ली\.?|सीसी|cc|gm|g|ग्रॅम|ग्रम|ग्रॅ)(?![a-zA-Z])", re.I)
+_DOSE_CTX_RE = re.compile(r"लिटर|पंप|प्रति|/\s*(?:l|लि)\b|per\s*l|पाण्यात", re.I)
+DOSE_REMOVED_NOTE = ("⚠️ या पिकासाठी औषधाचं प्रमाण (dose) इथे सांगत नाही — चुकीचा dose पिकाला हानी करू शकतो. "
+                     "कृपया जवळच्या कृषी सेवा केंद्र / KVK किंवा 📞 1800-180-1551 (मोफत) वर विचारा.")
+
+def strip_unverified_doses(text: str):
+    """(नवा_मजकूर, काही_काढलं_का). औषधाचा dose असलेल्या ओळी काढतो आणि मराठी सूचना जोडतो."""
+    if not text:
+        return text, False
+    kept, removed = [], False
+    for line in text.split("\n"):
+        if _DOSE_UNIT_RE.search(line) and _DOSE_CTX_RE.search(line):
+            removed = True
+            continue
+        kept.append(line)
+    if not removed:
+        return text, False
+    out = "\n".join(kept).strip()
+    out = re.sub(r"\n{3,}", "\n\n", out)
+    return f"{out}\n\n{DOSE_REMOVED_NOTE}".strip(), True
 
 # ── Knowledge Base — सर्व प्रमुख पिके ───────────────────────────────────────
 KNOWLEDGE = {
@@ -394,12 +441,12 @@ KB_CROPS = {
     "wheat":     ["wheat", "gahu", "gavha", "गहू", "गव्ह"],
     "chilli":    ["chilli", "mirchi", "मिरची"],
     "brinjal":   ["brinjal", "vange", "वांगी", "वांगे", "वांग्या", "वांग"],
-    "sugarcane": ["sugarcane", "us", "ऊस", "उस", "उसा"],
+    "sugarcane": ["sugarcane", "us", "usala", "usache", "ऊस", "उस", "उसा"],
 }
 
 OTHER_CROPS = {
     "mango":       ["mango", "amba", "aamba", "आंबा", "आंबे", "आंब्या", "आंब"],
-    "banana":      ["banana", "kela", "kele", "केळी", "केळ", "केळ्या"],
+    "banana":      ["banana", "केळी", "केळ", "केळ्या"],
     "orange":      ["orange", "santra", "narangi", "संत्रा", "संत्र्या", "मोसंबी", "mosambi"],
     "coconut":     ["coconut", "naral", "नारळ"],
     "jowar":       ["jowar", "jvari", "ज्वारी"],
@@ -411,7 +458,7 @@ OTHER_CROPS = {
     "harbara":     ["harbara", "chana", "chickpea", "हरभरा", "हरभऱ्या"],
     "groundnut":   ["groundnut", "bhuimug", "shengdana", "भुईमूग", "भुईमुग", "शेंगदाणा"],
     "turmeric":    ["turmeric", "halad", "हळद"],
-    "ginger":      ["ginger", "aale", "आले", "आलं", "आल्याला", "आल्याचं"],
+    "ginger":      ["ginger", "adrak", "आल्याला", "आल्याच"],
     "cabbage":     ["cabbage", "kobi", "कोबी"],
     "cauliflower": ["cauliflower", "phulkobi", "फ्लॉवर"],
     "okra":        ["okra", "bhendi", "bhindi", "भेंडी"],
@@ -442,7 +489,7 @@ def _detect_crops(text: str, farmer_crops: list) -> list:
     t = text.lower()
     found = []
     for crop, keywords in CROP_KEYWORDS.items():
-        if any(k in t for k in keywords):
+        if any_kw(keywords, t):
             found.append(crop)
     if found:
         return found
@@ -508,7 +555,7 @@ def _get_context(question: str, farmer: dict, history: list = None) -> tuple:
     unmapped = []
     topic_matched = False
 
-    if any(w in q for w in DISEASE_WORDS):
+    if any_kw(DISEASE_WORDS, q):
         topic_matched = True
         if len(active_crops) > 1:
             for crop in active_crops:
@@ -528,7 +575,7 @@ def _get_context(question: str, farmer: dict, history: list = None) -> tuple:
                     unmapped.append(crop)
         parts.append(KNOWLEDGE["pest_control"])
 
-    if any(w in q for w in FERTILIZER_WORDS):
+    if any_kw(FERTILIZER_WORDS, q):
         topic_matched = True
         for crop in active_crops:
             key = _FERT_MAP.get(crop)
@@ -538,17 +585,17 @@ def _get_context(question: str, farmer: dict, history: list = None) -> tuple:
             elif crop in OTHER_CROPS and crop not in unmapped:
                 unmapped.append(crop)
 
-    if any(w in q for w in SEASON_WORDS):
+    if any_kw(SEASON_WORDS, q):
         topic_matched = True
         parts.append(KNOWLEDGE["seasonal_calendar"])
         specific_found = True
 
-    if any(w in q for w in WATER_WORDS):
+    if any_kw(WATER_WORDS, q):
         topic_matched = True
         parts.append(KNOWLEDGE["irrigation"])
         specific_found = True
 
-    if any(w in q for w in SCHEME_WORDS):
+    if any_kw(SCHEME_WORDS, q):
         topic_matched = True
         parts.append(KNOWLEDGE["government_schemes"])
         specific_found = True
@@ -659,11 +706,13 @@ async def _tavily_search(query: str) -> str:
         from tavily import TavilyClient
         client = TavilyClient(api_key=TAVILY_API_KEY)
         search_query = f"{query} उपाय Maharashtra शेती मराठी"
-        result = client.search(
-            query=search_query,
-            search_depth="basic",
-            max_results=3
-        )
+        kwargs = {"query": search_query, "search_depth": "basic", "max_results": 3}
+        # TAVILY_DOMAINS="icar.gov.in,mpkv.ac.in" असं Render env मध्ये दिलं तर फक्त त्याच भरवशाच्या
+        # साइट्समधून माहिती येते (रिकामं ठेवलं तर पूर्वीसारखंच सगळीकडून).
+        _doms = [d.strip() for d in os.getenv("TAVILY_DOMAINS", "").split(",") if d.strip()]
+        if _doms:
+            kwargs["include_domains"] = _doms
+        result = client.search(**kwargs)
         items = result.get("results", [])
         if not items:
             return ""
@@ -694,7 +743,7 @@ async def _needs_web_search(question: str, context: str, specific_found: bool, u
     if unmapped_crops:
         return True
     q_lower = question.lower()
-    if any(w in q_lower for w in _WEB_SEARCH_TRIGGER_WORDS):
+    if any_kw(_WEB_SEARCH_TRIGGER_WORDS, q_lower):
         return True
     return False
 
@@ -754,6 +803,9 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
         # is_ambiguous असेल तर कधीच call करू नकोस — पीकच माहीत नसताना search केला तर
         # farmer_crops chya DEFAULT (कांदा/टोमॅटो) वर आधारित चुकीचा search होतो, आणि उगाच
         # Tavily quota (1000 credits/month) वाया जातो.
+        # टीप: dose फक्त तेव्हाच सांगायचा जेव्हा संदर्भात त्या पिकाची पडताळलेली रोग-माहिती (KB) आहे.
+        # इंटरनेट माहिती आली तरी तो "पडताळलेला" ठरत नाही (specific_found तरीही True होतो, पण dose_ok नाही).
+        dose_ok = any(KNOWLEDGE[k] in context for k in _DISEASE_MAP.values() if KNOWLEDGE.get(k))
         needs_search = (not is_ambiguous) and await _needs_web_search(question, context, specific_found, unmapped_crops)
         if TAVILY_API_KEY and needs_search:
             tavily_query = _build_tavily_query(question, unmapped_crops or current_msg_crops)
@@ -787,15 +839,19 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
         route = "UNMAPPED_CROP" if unmapped_crops else ("KB_HIT" if specific_found else "OTHER")
         log.info(f"ROUTING_STATS | route={route} | q_words={len(question.split())} | crops={unmapped_crops or 'known'}")
 
-        if not specific_found:
+        if not dose_ok:
             user_content += (
-                "\n\n[सूचना: वरील संदर्भात या प्रश्नाचं exact answer नाही. तरी तुझ्या स्वतःच्या "
-                "कृषी ज्ञानाने प्रामाणिक, practical उत्तर दे — टाळू नकोस किंवा फक्त 'कृषी केंद्राला विचारा' "
-                "असं म्हणून थांबू नकोस. उत्तराच्या शेवटी एका ओळीत 🎯 अचूकता: मध्यम — असं लिही आणि "
-                "जवळच्या कृषी सेवा केंद्र/1800-180-1551 वर खात्री करायला सांग.]"
+                "\n\n[सूचना: या पिकासाठी पडताळलेली औषध-माहिती आमच्याकडे नाही. तरी तुझ्या कृषी ज्ञानाने "
+                "प्रामाणिक, practical उत्तर दे — पण *औषधाचा dose/प्रमाण (ml, ग्रॅम, लिटर, पंपाला) कधीही सांगू नकोस* "
+                "आणि औषधांचे आकडे देऊ नकोस; फक्त लक्षणं, काळजी, मशागतीचे/नैसर्गिक उपाय आणि कोणत्या प्रकारचं औषध "
+                "लागेल ते सांग, आणि डोससाठी कृषी सेवा केंद्र/KVK/1800-180-1551 कडे पाठव. "
+                "उत्तराच्या शेवटी एका ओळीत 🎯 अचूकता: मध्यम — कृषी सेवा केंद्रात खात्री करा — असं लिही.]"
             )
         else:
             user_content += "\n\n[उत्तराच्या शेवटी एका ओळीत 🎯 अचूकता: उच्च — असं लिही, कारण ही माहिती पडताळलेल्या स्रोतातून आहे.]"
+            if unmapped_crops:
+                user_content += (f"\n[सूचना: {', '.join(unmapped_crops)} या पिकांसाठी औषध-dose सांगू नकोस — "
+                                 f"dose फक्त संदर्भातल्या पडताळलेल्या पिकांसाठीच.]")
 
         messages.append({"role": "user", "content": user_content})
 
@@ -809,6 +865,11 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
         if not ans:
             return "❌ थोडी अडचण आली. पुन्हा विचारा. 🙏"
 
+        if not dose_ok:
+            ans, _removed = strip_unverified_doses(ans)
+            if _removed:
+                log.info("DOSE_GUARD | unverified dose lines removed")
+
         return ans
 
     except Exception as e:
@@ -820,7 +881,7 @@ def _identify_photo_crop(caption: str, farmer_crops: list) -> list:
     text = (caption or "").lower()
     found = []
     for crop, keywords in CROP_KEYWORDS.items():
-        if any(k in text for k in keywords):
+        if any_kw(keywords, text):
             found.append(crop)
     if found:
         return found
@@ -916,7 +977,7 @@ async def disease_detect(image_bytes: bytes, caption: str, farmer: dict) -> str:
                     GROQ_URL,
                     headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
                     json={
-                        "model": "qwen/qwen3.6-27b",
+                        "model": GROQ_VISION_MODEL,
                         "messages": vision_messages,
                         "max_tokens": 500,
                         "temperature": 0.1
@@ -926,6 +987,13 @@ async def disease_detect(image_bytes: bytes, caption: str, farmer: dict) -> str:
                 d = r.json()["choices"][0]["message"]["content"].strip()
 
         if d:
+            # टीप: फोटोवरून dose फक्त तेव्हा — पीक आपल्याला खात्रीने माहीत आहे (caption/एकच नोंदलेलं पीक)
+            # आणि मॉडेलला स्वतःचा विश्वास "कमी" नाही. नाहीतर dose ओळी काढतो.
+            _low = ("विश्वास: कमी" in d) or ("confidence: low" in d.lower())
+            if (not identified) or _low:
+                d, _removed = strip_unverified_doses(d)
+                if _removed and not identified:
+                    d += "\n\n📝 पीकाचं नाव लिहून फोटो पुन्हा पाठवा (उदा. फोटोसोबत 'कांदा' लिहा) — मग नेमका उपाय सांगतो."
             result = f"{d}\n\n📞 _कृषी हेल्पलाइन: 1800-180-1551 (मोफत)_"
             # Low confidence असेल तर specific re-take instructions जोड
             if "विश्वास: कमी" in d or "confidence: low" in d.lower():
