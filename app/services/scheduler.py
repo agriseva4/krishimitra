@@ -48,7 +48,7 @@ async def daily_mandi():
     try:
         from app.services.database import get_all_farmers, try_claim_broadcast
         from app.services.mandi import get_mandi_prices, get_trend_line, CROP_MAP
-        from app.services.whatsapp import send_message
+        from app.services.whatsapp import send_broadcast
         # टीप: Render deploy/restart दरम्यान 2 processes क्षणभर एकत्र चालल्यास, दोन्ही हाच
         # broadcast पाठवायचा प्रयत्न करू शकतात — यामुळे farmer ला duplicate messages जायचे.
         # claim जिंकला नाही तर (म्हणजे दुसऱ्या process ने आधीच पाठवलंय) लगेच थांब.
@@ -91,7 +91,7 @@ async def daily_mandi():
                     full_msg += "\n\n📈 *७-दिवस कल:*\n" + "\n".join(trend_lines)
                 full_msg += "\n\n❓ इतर पिकाचा भाव हवा असेल तर पीक नाव पाठवा!"
 
-                await send_message(f["phone"], full_msg)
+                await send_broadcast(f["phone"], full_msg)
                 await asyncio.sleep(0.5)
             except Exception as e:
                 log.warning(f"Daily mandi {f.get('phone')}: {e}")
@@ -104,7 +104,7 @@ async def weather_alert_check():
     (2) आधी तोच alert दर तासाला जायचा — आता प्रत्येक जागेसाठी दिवसातून एकदाच (broadcast_log claim)."""
     try:
         from app.services.database import get_all_farmers, try_claim_broadcast
-        from app.services.whatsapp import send_message
+        from app.services.whatsapp import send_broadcast
         import httpx
         from app.config import OPENWEATHER_API_KEY
 
@@ -132,7 +132,7 @@ async def weather_alert_check():
                 alert_msg = _check_danger(r.json(), g["city"])
                 if alert_msg and await try_claim_broadcast(f"wx_{key}"):
                     for phone in g["phones"]:
-                        await send_message(phone, alert_msg)
+                        await send_broadcast(phone, alert_msg)
                         await asyncio.sleep(0.5)
                 await asyncio.sleep(0.3)
             except Exception as e:
@@ -241,7 +241,7 @@ async def morning():
     try:
         from app.services.database import get_all_farmers, try_claim_broadcast
         from app.services.weather import get_weather
-        from app.services.whatsapp import send_message
+        from app.services.whatsapp import send_broadcast
         if not await try_claim_broadcast("morning"):
             return
         farmers = await get_all_farmers()
@@ -250,7 +250,7 @@ async def morning():
             try:
                 w = await get_weather(f.get("lat"), f.get("lon"), f.get("city", "Pune"))
                 msg = f"🌅 *सुप्रभात! — KrishiMitra*\n\n{w}\n\n❓ काही प्रश्न असल्यास विचारा!"
-                await send_message(f["phone"], msg)
+                await send_broadcast(f["phone"], msg)
                 await asyncio.sleep(0.5)
             except Exception as e:
                 log.warning(f"Morning {f.get('phone')}: {e}")
@@ -260,7 +260,7 @@ async def morning():
 async def evening():
     try:
         from app.services.database import get_all_farmers, try_claim_broadcast
-        from app.services.whatsapp import send_message
+        from app.services.whatsapp import send_broadcast
         if not await try_claim_broadcast("evening"):
             return
         farmers = await get_all_farmers()
@@ -271,7 +271,7 @@ async def evening():
                 # असायचा, farmer च्या स्वतःच्या पिकाशी काहीही संबंध नसताना. आता farmer.crops
                 # बघून त्याच्याशी जुळणारा tip दिला जातो — नसेल जुळत तर crop-तटस्थ generic tip.
                 tip = _tip(datetime.now().month, f.get("crops", []))
-                await send_message(f["phone"], tip)
+                await send_broadcast(f["phone"], tip)
                 await asyncio.sleep(0.5)
             except Exception as e:
                 log.warning(f"Evening {f.get('phone')}: {e}")
