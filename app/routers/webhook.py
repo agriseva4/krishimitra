@@ -1,7 +1,7 @@
-import logging, time
+import logging, time, json, hmac, hashlib
 from fastapi import APIRouter, Request, BackgroundTasks
 from fastapi.responses import PlainTextResponse
-from app.config import META_VERIFY_TOKEN
+from app.config import META_VERIFY_TOKEN, META_APP_SECRET
 from app.services.message_handler import handle
 from app.services.whatsapp import send_message
 from app.services.database import try_claim_message
@@ -37,7 +37,7 @@ def _is_duplicate_in_memory(msg_id: str) -> bool:
 @router.get("")
 async def verify(request: Request):
     p = dict(request.query_params)
-    if p.get("hub.mode") == "subscribe" and p.get("hub.verify_token") == META_VERIFY_TOKEN:
+    if META_VERIFY_TOKEN and p.get("hub.mode") == "subscribe" and p.get("hub.verify_token") == META_VERIFY_TOKEN:
         log.info("✅ Webhook verified!")
         return PlainTextResponse(content=p.get("hub.challenge", ""))
     log.warning("❌ Webhook verify failed!")
@@ -46,7 +46,16 @@ async def verify(request: Request):
 @router.post("")
 async def receive(request: Request, bg: BackgroundTasks):
     try:
-        body = await request.json()
+        raw = await request.body()
+        # Meta च्या signature (X-Hub-Signature-256) ने खात्री — फक्त खऱ्या WhatsApp कडूनच्या requests
+        # स्वीकारतो. META_APP_SECRET set नसेल तर (तात्पुरतं) तपासणी वगळतो, पण startup वर warning येते.
+        if META_APP_SECRET:
+            sig = request.headers.get("X-Hub-Signature-256", "")
+            expected = "sha256=" + hmac.new(META_APP_SECRET.encode(), raw, hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(sig, expected):
+                log.warning("❌ Webhook signature mismatch — request नाकारली")
+                return PlainTextResponse(content="Forbidden", status_code=403)
+        body = json.loads(raw or b"{}")
         msgs = (body.get("entry",[{}])[0]
                     .get("changes",[{}])[0]
                     .get("value",{})
@@ -76,6 +85,11 @@ async def receive(request: Request, bg: BackgroundTasks):
 
 async def _process(phone, msg, mtype):
     try:
+        # 👍/👎 बटण दाबलं — साठवून धन्यवाद म्हणा (यावर "प्रश्न मिळाला!" ack नको)
+        if mtype == "interactive":
+            from app.services.feedback import handle_feedback_reply
+            await handle_feedback_reply(phone, msg)
+            return
         # 100% Marathi acknowledgement
         ack_map = {
             "image":  "📸 *फोटो मिळाला!*\nपीक रोग तपासतो... थोडा वेळ थांबा 🔬",
@@ -88,6 +102,14 @@ async def _process(phone, msg, mtype):
         resp = await handle(phone, msg, mtype)
         if resp:
             await send_message(phone, resp)
+            # AI-उत्तरानंतर (प्रत्येक दुसऱ्या वेळी / फोटो-निदानानंतर) 👍/👎 विचारा
+            try:
+                from app.services.message_handler import pop_feedback_flag
+                if pop_feedback_flag(phone):
+                    from app.services.feedback import ask_feedback
+                    await ask_feedback(phone)
+            except Exception as e:
+                log.warning(f"Feedback ask skipped {phone}: {e}")
             # Farmer ने VOICE ने विचारलं होतं तर उत्तर सुद्धा voice madhe pathaव —
             # tyala vachaता yet nasel tar hे khूप उपयोगी. Best-effort — TTS fail zala
             # tarी text answer aधीच gela aahe, so farmer कधीच रिकाम्या हाताने राहत नाही.
