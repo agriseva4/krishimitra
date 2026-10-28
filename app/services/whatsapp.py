@@ -1,4 +1,6 @@
-import logging, httpx
+import logging, os, httpx
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from app.config import META_ACCESS_TOKEN, META_PHONE_NUMBER_ID
 
 log = logging.getLogger(__name__)
@@ -7,10 +9,20 @@ TO = httpx.Timeout(15.0, connect=5.0)
 def _url(): return f"https://graph.facebook.com/v19.0/{META_PHONE_NUMBER_ID}/messages"
 def _hdr(): return {"Authorization": f"Bearer {META_ACCESS_TOKEN}", "Content-Type": "application/json"}
 
-async def send_message(to: str, text: str) -> bool:
+REENGAGE_CODE = 131047   # Meta: "Re-engagement message" — farmer ने गेल्या 24 तासांत message केला नाही
+WA_NUDGE_TEMPLATE = os.getenv("WA_NUDGE_TEMPLATE", "")   # Meta मध्ये approve केलेल्या template चं नाव
+WA_NUDGE_LANG = os.getenv("WA_NUDGE_LANG", "mr")
+_IST = ZoneInfo("Asia/Kolkata")
+_nudged = {}   # phone -> शेवटची nudge तारीख (IST)
+
+def _today():
+    return datetime.now(_IST).date().isoformat()
+
+async def send_message_ex(to: str, text: str):
+    """(ok, error_code) परत करतो — error_code Meta चा (उदा. 131047) किंवा None."""
     if not META_ACCESS_TOKEN or not META_PHONE_NUMBER_ID:
         log.warning("META keys missing")
-        return False
+        return False, None
     if len(text) > 4090: text = text[:4087] + "..."
     try:
         async with httpx.AsyncClient(timeout=TO) as c:
@@ -21,12 +33,67 @@ async def send_message(to: str, text: str) -> bool:
                 "text": {"body": text, "preview_url": False}
             }, headers=_hdr())
             if r.status_code != 200:
-                log.error(f"WA [{r.status_code}]: {r.text[:100]}")
+                code = None
+                try:
+                    code = (r.json().get("error") or {}).get("code")
+                except Exception:
+                    pass
+                log.error(f"WA [{r.status_code}] code={code}: {r.text[:100]}")
+                return False, code
+            return True, None
+    except Exception as e:
+        log.error(f"send_message: {e}")
+        return False, None
+
+async def send_message(to: str, text: str) -> bool:
+    ok, _code = await send_message_ex(to, text)
+    return ok
+
+async def send_template(to: str, name: str, lang: str = "mr", body_params: list = None) -> bool:
+    """Meta ने approve केलेला template पाठवतो (24-तास window बाहेरही चालतो)."""
+    if not META_ACCESS_TOKEN or not META_PHONE_NUMBER_ID or not name:
+        return False
+    try:
+        tpl = {"name": name, "language": {"code": lang}}
+        if body_params:
+            tpl["components"] = [{"type": "body",
+                                  "parameters": [{"type": "text", "text": str(x)} for x in body_params]}]
+        async with httpx.AsyncClient(timeout=TO) as c:
+            r = await c.post(_url(), json={"messaging_product": "whatsapp", "to": to,
+                                           "type": "template", "template": tpl}, headers=_hdr())
+            if r.status_code != 200:
+                log.error(f"WA template [{r.status_code}]: {r.text[:140]}")
                 return False
             return True
     except Exception as e:
-        log.error(f"send_message: {e}")
+        log.error(f"send_template: {e}")
         return False
+
+async def send_broadcast(to: str, text: str) -> bool:
+    """रोजचे/प्रोॲक्टिव्ह संदेश: आधी साधा text; farmer 24 तासांच्या window बाहेर असेल (131047)
+    तर, आणि WA_NUDGE_TEMPLATE set असेल तर, दिवसातून एकदा छोटा template ("हो म्हणा") पाठवतो.
+    शेतकऱ्याने 'हो' म्हटलं की window उघडते आणि message_handler आजचं हवामान+भाव पाठवतो."""
+    ok, code = await send_message_ex(to, text)
+    if ok:
+        return True
+    if code == REENGAGE_CODE and WA_NUDGE_TEMPLATE and _nudged.get(to) != _today():
+        if await send_template(to, WA_NUDGE_TEMPLATE, WA_NUDGE_LANG):
+            _nudged[to] = _today()
+            return True
+    return False
+
+def was_nudged_recently(phone: str) -> bool:
+    d = _nudged.get(phone)
+    if not d:
+        return False
+    today = datetime.now(_IST).date()
+    try:
+        return (today - datetime.fromisoformat(d).date()).days <= 1
+    except Exception:
+        return False
+
+def clear_nudge(phone: str):
+    _nudged.pop(phone, None)
 
 async def get_media_url(media_id: str) -> str:
     if not media_id: return ""
