@@ -121,7 +121,9 @@ async def get_all_farmers() -> list:
         db = get_db()
         if not db: return []
         r = db.table("farmers").select("*").eq("is_approved", True).eq("is_blocked", False).execute()
-        return r.data or []
+        # टीप: opted_out (ज्यांनी "बंद" लिहिलं) त्यांना कोणताही रोजचा/प्रोॲक्टिव्ह संदेश जाऊ नये.
+        # Python मध्ये गाळतो (DB filter नाही) — म्हणजे opted_out column अजून बनवला नसेल तरी काहीही तुटत नाही.
+        return [f for f in (r.data or []) if not f.get("opted_out")]
     except Exception as e:
         log.error(f"get_all_farmers: {e}")
         return []
@@ -227,4 +229,16 @@ async def try_claim_message(message_id: str) -> bool:
     except Exception as e:
         # Unique constraint violation म्हणजे हा message_id आधीच process झालाय — duplicate!
         log.info(f"Duplicate message (DB-level) skip: {message_id}")
+        return False
+
+
+async def set_opt_out(phone: str, flag: bool) -> bool:
+    """रोजचे संदेश बंद/चालू. यश आलं तर True (column नसेल तर False)."""
+    try:
+        db = get_db()
+        if not db: return False
+        db.table("farmers").update({"opted_out": flag}).eq("phone", phone).execute()
+        return True
+    except Exception as e:
+        log.error(f"set_opt_out: {e}")
         return False
