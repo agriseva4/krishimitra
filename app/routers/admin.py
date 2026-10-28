@@ -36,16 +36,16 @@ async def list_farmers(s: Optional[str] = Header(None, alias="X-Admin-Secret")):
 async def approve(req: ApproveReq, s: Optional[str] = Header(None, alias="X-Admin-Secret")):
     _auth(s)
     from app.services.database import approve_farmer
-    from app.services.whatsapp import send_message
-    from app.services.message_handler import _build_state_select
+    from app.services.whatsapp import send_broadcast
+    from app.services.message_handler import _build_state_select, CONSENT_LINE
     data = {"is_free": req.is_free}
     if req.name: data["name"] = req.name
     if req.crops: data["crops"] = req.crops
     ok = await approve_farmer(req.phone, data)
     if ok:
-        await send_message(req.phone,
+        await send_broadcast(req.phone,
             "✅ *KrishiMitra मध्ये स्वागत!*\n\n"
-            "तुमची नोंदणी मंजूर झाली! 🎉\n\n" + _build_state_select())
+            "तुमची नोंदणी मंजूर झाली! 🎉\n\n" + _build_state_select() + "\n\n" + CONSENT_LINE)
     return {"status":"approved" if ok else "failed","phone":req.phone}
 
 @router.post("/block")
@@ -74,7 +74,7 @@ async def stats(s: Optional[str] = Header(None, alias="X-Admin-Secret")):
 async def broadcast(message: str, s: Optional[str] = Header(None, alias="X-Admin-Secret")):
     _auth(s)
     from app.services.database import get_all_farmers
-    from app.services.whatsapp import send_message
+    from app.services.whatsapp import send_broadcast
     farmers = await get_all_farmers()
     sent = 0
     failed = 0
@@ -82,7 +82,7 @@ async def broadcast(message: str, s: Optional[str] = Header(None, alias="X-Admin
         try:
             # टीप: आधी send_message चा result न बघताच sent मोजायचो — आता फक्त खरोखर गेलेले मोजतो.
             # (24 तासांत farmer ने message केला नसेल तर Meta free-form text नाकारतो.)
-            if await send_message(f["phone"], f"📢 *KrishiMitra:*\n\n{message}"):
+            if await send_broadcast(f["phone"], f"📢 *KrishiMitra:*\n\n{message}"):
                 sent += 1
             else:
                 failed += 1
