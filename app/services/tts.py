@@ -1,4 +1,5 @@
 import logging
+import os
 import httpx
 from app.config import GROQ_API_KEY
 
@@ -12,6 +13,11 @@ GROQ_TTS_URL = "https://api.groq.com/openai/v1/audio/speech"
 # — तिथे वेगळी API key लागेल (.env मध्ये नवीन variable add करावी लागेल).
 _DEFAULT_VOICE = "Fritz-PlayAI"
 
+# टीप: Groq चं playai-tts 31 Dec 2025 ला बंद झालं (replacement Orpheus फक्त English/Arabic —
+# मराठी नाही). म्हणून voice reply सध्या बंद; मराठी TTS (उदा. Sarvam.ai) जोडल्यावर
+# TTS_ENABLED=true करा आणि खालचा request बदला.
+TTS_ENABLED = os.getenv("TTS_ENABLED", "false").lower() == "true"
+
 def _clean_for_speech(text: str) -> str:
     """WhatsApp formatting (*, _, #, emoji) TTS la nीट vaचता येत नाही — काढून टाक"""
     import re
@@ -21,7 +27,7 @@ def _clean_for_speech(text: str) -> str:
 
 async def text_to_speech(text: str, voice: str = _DEFAULT_VOICE) -> bytes:
     """Marathi/English text ला audio (mp3) madhe convert karto. Fail zala tar b'' return."""
-    if not GROQ_API_KEY or not text:
+    if not TTS_ENABLED or not GROQ_API_KEY or not text:
         return b""
     try:
         clean_text = _clean_for_speech(text)[:900]  # WhatsApp audio जास्त लांब नको
