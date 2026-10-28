@@ -72,3 +72,20 @@ def get_district_coords(district_key: str):
     if not d:
         return (18.5204, 73.8567)  # Pune fallback
     return (d[2], d[3])
+
+
+# टीप: data.gov.in / Agmarknet ला जिल्ह्याचं नाव इंग्रजीत (त्यांच्या spelling मध्ये) लागतं.
+# DB मध्ये district मराठी नावाने साठवला जातो, म्हणून mandi call करताना हा नकाशा वापरतो.
+# Spelling (उदा. Amarawati, Jalana) एकदा प्रत्यक्ष call करून तपासा — चुकली तर इथेच सुधारा.
+DISTRICT_ENGLISH = {
+    "mumbai_city": "Mumbai", "mumbai_suburban": "Mumbai", "thane": "Thane", "palghar": "Palghar",
+    "raigad": "Raigad", "ratnagiri": "Ratnagiri", "sindhudurg": "Sindhudurg",
+    "nashik": "Nashik", "dhule": "Dhule", "nandurbar": "Nandurbar", "jalgaon": "Jalgaon",
+    "ahilyanagar": "Ahmednagar",
+    "pune": "Pune", "satara": "Satara", "sangli": "Sangli", "solapur": "Solapur", "kolhapur": "Kolhapur",
+    "aurangabad": "Aurangabad", "jalna": "Jalana", "parbhani": "Parbhani", "hingoli": "Hingoli",
+    "beed": "Beed", "latur": "Latur", "osmanabad": "Osmanabad", "nanded": "Nanded",
+    "amravati": "Amarawati", "akola": "Akola", "washim": "Washim", "buldhana": "Buldhana", "yavatmal": "Yavatmal",
+    "nagpur": "Nagpur", "wardha": "Wardha", "bhandara": "Bhandara", "gondia": "Gondia",
+    "chandrapur": "Chandrapur", "gadchiroli": "Gadchiroli",
+}
