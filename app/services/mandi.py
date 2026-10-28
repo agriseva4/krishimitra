@@ -1,10 +1,32 @@
 import logging, httpx
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
+from zoneinfo import ZoneInfo
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 from app.config import DATA_GOV_API_KEY
+from app.data.maharashtra_locations import MAHARASHTRA_DISTRICTS, DISTRICT_ENGLISH
 
 log = logging.getLogger(__name__)
 TO = httpx.Timeout(12.0, connect=5.0)
+IST = ZoneInfo("Asia/Kolkata")
+
+def _today_ist():
+    """Render server UTC वर चालतो — भावाची तारीख भारतीय (IST) वेळेनुसार घे"""
+    return datetime.now(IST).date()
+
+def english_district(name: str) -> str:
+    """DB मध्ये district मराठी नावाने असतो (उदा. \"पुणे\") — data.gov/Agmarknet ला इंग्रजी नाव लागतं.
+    मराठी नाव, district key किंवा आधीच इंग्रजी नाव — तिन्ही स्वीकारतो."""
+    if not name:
+        return "Pune"
+    name = name.strip()
+    for key, (mr, _t, _la, _lo) in MAHARASHTRA_DISTRICTS.items():
+        if name == mr:
+            return DISTRICT_ENGLISH.get(key, key.replace("_", " ").title())
+    k = name.lower().replace(" ", "_")
+    if k in DISTRICT_ENGLISH:
+        return DISTRICT_ENGLISH[k]
+    return name.title()
+
 DATA_GOV_URL = "https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070"
 AGMARKNET_URL = "https://agmarknet.gov.in/SearchCmmMkt.aspx"
 
@@ -119,7 +141,9 @@ CROP_EMOJI = {
 }
 
 async def get_mandi_prices(district: str = "Pune", crop: str = None, crops: list = None) -> str:
-    today = date.today().strftime("%d-%b-%Y")
+    display_district = district          # farmer ला दाखवायचं नाव (मराठी)
+    district = english_district(district)  # API/DB साठी इंग्रजी नाव
+    today = _today_ist().strftime("%d-%b-%Y")
     if crops:
         crop_names = list(dict.fromkeys([CROP_MAP.get(c.lower(), c.capitalize()) for c in crops]))
     elif crop:
@@ -151,7 +175,7 @@ async def get_mandi_prices(district: str = "Pune", crop: str = None, crops: list
                     log.warning(f"Agmarknet {market}: {e}")
 
     if not all_prices:
-        yday = (date.today() - timedelta(days=1)).strftime("%d-%b-%Y")
+        yday = (_today_ist() - timedelta(days=1)).strftime("%d-%b-%Y")
         for c in crop_names:
             try:
                 prices = await _fetch_agmarknet(c, district, yday)
@@ -171,9 +195,9 @@ async def get_mandi_prices(district: str = "Pune", crop: str = None, crops: list
 
     if all_prices:
         await _store(all_prices, district)
-        return _fmt(all_prices, today, district, used_default)
+        return _fmt(all_prices, today, display_district, used_default)
 
-    return _fallback(today, district)
+    return _fallback(today, display_district, district)
 
 @retry(stop=stop_after_attempt(2), wait=wait_fixed(1), retry=retry_if_exception_type(httpx.TimeoutException))
 async def _fetch_data_gov(commodity: str, district: str, market: str = None) -> list:
@@ -249,7 +273,7 @@ async def _store(prices: list, district: str):
             "min_price": p.get("min_price", 0),
             "max_price": p.get("max_price", 0),
             "modal_price": p.get("modal_price", 0),
-            "price_date": date.today().isoformat()
+            "price_date": _today_ist().isoformat()
         } for p in prices]
         await store_mandi(records)
     except Exception as e:
@@ -258,6 +282,8 @@ async def _store(prices: list, district: str):
 async def get_trend(commodity: str, district: str = "Pune") -> str:
     try:
         from app.services.database import get_mandi_history
+        display = district
+        district = english_district(district)
         data = await get_mandi_history(commodity, district, 7)
         if len(data) < 2:
             return f"📊 *{commodity}* साठी पुरेसा डेटा नाही.\n७ दिवसांनंतर trend दिसेल!"
@@ -267,7 +293,7 @@ async def get_trend(commodity: str, district: str = "Pune") -> str:
         pct = (change / first * 100) if first > 0 else 0
         arrow = "📈" if change > 0 else "📉" if change < 0 else "➡️"
         word = "वाढला" if change > 0 else "घटला" if change < 0 else "स्थिर"
-        return (f"📊 *{commodity} ७-दिवस कल — {district}*\n\n"
+        return (f"📊 *{commodity} ७-दिवस कल — {display}*\n\n"
                 f"{arrow} भाव *{word}*: ₹{abs(change):.0f}/क्विंटल ({pct:.1f}%)\n"
                 f"• ७ दिवसांपूर्वी: ₹{first:.0f}\n• आज: ₹{last:.0f}\n\n"
                 f"_स्रोत: KrishiMitra DB_")
@@ -279,7 +305,7 @@ async def get_trend_line(commodity: str, district: str = "Pune") -> str:
     """daily broadcast sathi — ek chhoti, ek-oli trend (7-din tulnet)"""
     try:
         from app.services.database import get_mandi_history
-        data = await get_mandi_history(commodity, district, 7)
+        data = await get_mandi_history(commodity, english_district(district), 7)
         if len(data) < 2:
             return ""
         prices = [d["modal_price"] for d in data]
@@ -317,11 +343,11 @@ def _fmt(prices: list, date_str: str, district: str, used_default: bool = False)
     lines.append("_स्रोत: data.gov.in / Agmarknet_")
     return "\n".join(lines)
 
-def _fallback(date_str: str, district: str) -> str:
+def _fallback(date_str: str, display: str, district: str) -> str:
     markets = DISTRICT_MARKETS.get(district.lower(), [district])
-    return (f"📊 *{district} मंडई भाव — {date_str}*\n\n"
+    return (f"📊 *{display} मंडई भाव — {date_str}*\n\n"
             f"⚠️ ताजी माहिती सध्या उपलब्ध नाही.\n\n"
-            f"*{district} जवळच्या मंडया:* {', '.join(markets)}\n\n"
+            f"*{display} जवळच्या मंडया:* {', '.join(markets)}\n\n"
             f"*इथे तपासा:*\n"
             f"🌐 agmarknet.gov.in\n"
             f"🌐 data.gov.in\n\n"
