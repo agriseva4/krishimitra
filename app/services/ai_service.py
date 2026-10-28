@@ -17,6 +17,8 @@ GROQ_MODEL     = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 # टीप: Model नावं Render env मध्ये ठेवली — Google/Groq model बंद केलं तरी code बदलावा लागत नाही.
 GEMINI_MODEL   = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
 GROQ_VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
+# फोटो-निदानासाठी वेगळा (मोठा) Gemini model वापरता येतो; नाही दिला तर GEMINI_MODEL च.
+GEMINI_VISION_MODEL = os.getenv("GEMINI_VISION_MODEL", GEMINI_MODEL)
 
 # ── Keyword matching (शब्द-सीमा सह) ─────────────────────────────────────────
 # आधी `kw in text` (substring) वापरायचो — त्यामुळे "paus" मध्ये "us" (ऊस), "until" मध्ये "til" (तीळ)
@@ -962,7 +964,7 @@ async def disease_detect(image_bytes: bytes, caption: str, farmer: dict) -> str:
                     r = await c.post(
                         GEMINI_URL,
                         headers={"Authorization": f"Bearer {GEMINI_API_KEY}", "Content-Type": "application/json"},
-                        json={"model": GEMINI_MODEL, "messages": vision_messages, "max_tokens": 400, "temperature": 0.1}
+                        json={"model": GEMINI_VISION_MODEL, "messages": vision_messages, "max_tokens": 400, "temperature": 0.1}
                     )
                     if r.status_code == 200:
                         d = _clean_llm_output(r.json()["choices"][0]["message"]["content"])
