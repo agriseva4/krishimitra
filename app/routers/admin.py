@@ -105,3 +105,11 @@ async def feedback(rating: str = "down", limit: int = 50,
     up = db.table("feedback").select("id", count="exact").eq("rating", "up").execute()
     down = db.table("feedback").select("id", count="exact").eq("rating", "down").execute()
     return {"up": up.count or 0, "down": down.count or 0, "items": r.data}
+
+@router.get("/usage")
+async def usage(s: Optional[str] = Header(None, alias="X-Admin-Secret")):
+    """आजचा AI/Search वापर — free-tier मर्यादेपासून किती दूर आहात ते बघायला."""
+    _auth(s)
+    from app.services.ai_service import _gemini_q, _groq_q, _tavily_q
+    return {"gemini": _gemini_q.status(), "groq": _groq_q.status(), "tavily": _tavily_q.status(),
+            "note": "Gemini दिवस = Pacific वेळ (मध्यरात्री reset); Tavily दिवस = IST. हा आकडा server restart वर शून्य होतो."}
