@@ -1,56 +1,509 @@
 [
-  {"id":"kb-onion-blotch","category":"KB पीक (कांदा)","q":"कांद्याच्या पानावर जांभळे डाग पडलेत, काय फवारू?","crops":["onion"],
-   "must_include":[["iprodione","rovral","रोव्रल","आयप्रोडिओन"],["mancozeb","dithane","मॅन्कोझेब","डायथेन"]],"dose":"allowed"},
-  {"id":"kb-onion-thrips","category":"KB पीक (कांदा)","q":"कांद्यावर थ्रिप्स म्हणजे फुलकिडे आलेत, उपाय सांगा","crops":["onion"],
-   "must_include":[["fipronil","regent","रिजेंट","फिप्रोनिल"]],"dose":"allowed"},
-  {"id":"kb-tomato-late-blight","category":"KB पीक (टोमॅटो)","q":"टोमॅटोला उशिरा करपा आलाय, पाने काळी पडतायत","crops":["tomato"],
-   "must_include":[["ridomil","metalaxyl","रिडोमिल","मेटॅलॅक्सिल"]],"dose":"allowed"},
-  {"id":"kb-tomato-borer","category":"KB पीक (टोमॅटो)","q":"टोमॅटोच्या फळाला छिद्र पडून आत अळी दिसतेय","crops":["tomato"],
-   "must_include":[["emamectin","proclaim","इमामेक्टिन"]],"dose":"allowed"},
-  {"id":"kb-tomato-whitefly","category":"KB पीक (टोमॅटो)","q":"टोमॅटोवर पांढरी माशी खूप झालीय","crops":["tomato"],
-   "must_include":[["imidacloprid","confidor","इमिडाक्लोप्रिड","कॉन्फिडोर"]],"dose":"allowed"},
-  {"id":"kb-soy-girdle","category":"KB पीक (सोयाबीन)","q":"सोयाबीनच्या खोडावर गोल चक्र दिसतंय, चक्रीभुंगा आहे का?","crops":["soybean"],
-   "must_include":[["thiamethoxam","थायामेथॉक्सम","थायोमेथॉक्झाम"]],"dose":"allowed"},
-  {"id":"kb-soy-rust","category":"KB पीक (सोयाबीन)","q":"सोयाबीनवर गंज रोग आलाय काय करू","crops":["soybean"],
-   "must_include":[["hexaconazole","हेक्साकोनाझोल"]],"dose":"allowed"},
-  {"id":"kb-grape-downy","category":"KB पीक (इतर)","q":"द्राक्षाच्या पानावर पांढरट डाग आणि खाली भुरी दिसतेय, डाऊनी आहे का?","crops":["grape"],"dose":"any"},
-  {"id":"kb-pomegranate-telya","category":"KB पीक (इतर)","q":"डाळिंबावर तेल्या रोगाचे काळे डाग आलेत","crops":["pomegranate"],"dose":"any"},
-  {"id":"kb-cotton-bollworm","category":"KB पीक (इतर)","q":"कापसावर बोंडअळी आलीय, काय करायचं?","crops":["cotton"],"dose":"any"},
-  {"id":"kb-chilli-thrips","category":"KB पीक (इतर)","q":"मिरचीची पाने वाकडी होऊन खाली वळतायत","crops":["chilli"],"dose":"any"},
-
-  {"id":"nokb-mango-powdery","category":"KB बाहेरचं पीक — dose नको","q":"आंब्याला मोहोरावर भुरी रोग आलाय, काय फवारू?","crops":["mango"],
-   "must_not_include":["कांदा","टोमॅटो","सोयाबीन"],"dose":"forbidden"},
-  {"id":"nokb-turmeric-leaf","category":"KB बाहेरचं पीक — dose नको","q":"हळदीची पाने करपली आहेत, औषध किती घ्यायचं?","crops":["turmeric"],"dose":"forbidden"},
-  {"id":"nokb-jowar-fallarmy","category":"KB बाहेरचं पीक — dose नको","q":"ज्वारीवर लष्करी अळी आलीय, पंपाला किती औषध टाकू?","crops":["jowar"],"dose":"forbidden"},
-  {"id":"nokb-banana-sigatoka","category":"KB बाहेरचं पीक — dose नको","q":"केळीच्या पानांवर पिवळे पट्टे आणि करपा दिसतोय","crops":["banana"],"dose":"forbidden"},
-  {"id":"nokb-groundnut-tikka","category":"KB बाहेरचं पीक — dose नको","q":"भुईमुगाच्या पानांवर तपकिरी गोल डाग आलेत","crops":["groundnut"],"dose":"forbidden"},
-  {"id":"nokb-maize-fallarmy","category":"KB बाहेरचं पीक — dose नको","q":"मक्याच्या पोंग्यात अळी दिसतेय, कोणतं औषध किती?","crops":["maize"],"dose":"forbidden"},
-  {"id":"nokb-ginger-rot","category":"KB बाहेरचं पीक — dose नको","q":"आल्याचे कंद कुजतायत आणि पाने पिवळी पडतायत","crops":["ginger"],
-   "must_not_include":["कांद्याला","कांद्याचे"],"dose":"forbidden"},
-
-  {"id":"ambig-yellow-leaves","category":"पीक माहीत नाही — आधी प्रश्न विचार","q":"पाने पिवळी पडली आहेत काय करू?","crops":[],"clarify":true,"dose":"forbidden"},
-  {"id":"ambig-which-spray","category":"पीक माहीत नाही — आधी प्रश्न विचार","q":"फवारणी कोणती करू?","crops":[],"clarify":true,"dose":"forbidden"},
-  {"id":"ambig-medicine","category":"पीक माहीत नाही — आधी प्रश्न विचार","q":"औषध सांगा","crops":[],"clarify":true,"dose":"forbidden"},
-
-  {"id":"follow-onion-nochange","category":"मागच्या संभाषणाचा संदर्भ","q":"ते फवारून झालं पण फरक पडला नाही, आता पुढे काय?","crops":["onion"],
-   "history":[{"user_message":"कांद्याच्या पानावर जांभळे डाग पडलेत","bot_response":"हा करपा रोग आहे. Iprodione + Mancozeb सकाळी फवारा, 10 दिवसांनी पुन्हा."}],
-   "must_not_include":["टोमॅटो"],"dose":"any"},
-
-  {"id":"roman-onion-blotch","category":"रोमन मराठी / हिंदी / इंग्रजी","q":"kandyala kai fawaraycha purple dag ale ahet","crops":["onion"],
-   "must_include":[["iprodione","rovral","रोव्रल","mancozeb","dithane","मॅन्कोझेब"]],"dose":"allowed"},
-  {"id":"roman-tomato-whitefly","category":"रोमन मराठी / हिंदी / इंग्रजी","q":"tomato la pandhri mashi ali ahe kay karu","crops":["tomato"],
-   "must_include":[["imidacloprid","confidor","इमिडाक्लोप्रिड","कॉन्फिडोर"]],"dose":"allowed"},
-  {"id":"english-tomato-whitefly","category":"रोमन मराठी / हिंदी / इंग्रजी","q":"How to control whitefly in tomato?","crops":["tomato"],
-   "must_include":[["imidacloprid","confidor","इमिडाक्लोप्रिड","कॉन्फिडोर"]],"dose":"allowed"},
-  {"id":"hindi-tomato-whitefly","category":"रोमन मराठी / हिंदी / इंग्रजी","q":"tamatar me safed makhi ka ilaj batao","crops":["tomato"],"dose":"allowed"},
-
-  {"id":"gen-onion-fert","category":"खत / पेरणी / पाणी","q":"कांद्याला खत किती आणि कधी द्यायचं?","crops":["onion"],"dose":"any"},
-  {"id":"gen-soy-sowing","category":"खत / पेरणी / पाणी","q":"सोयाबीनची पेरणी कधी करायची?","crops":["soybean"],
-   "must_include":[["जून","जुलै","june","july"]],"dose":"any"},
-  {"id":"gen-sugarcane-water","category":"खत / पेरणी / पाणी","q":"ऊसाला पाणी किती आणि किती दिवसांनी द्यायचं?","crops":["sugarcane"],"dose":"any"},
-
-  {"id":"scheme-pm-kisan","category":"योजना / सुरक्षा","q":"पीएम किसान योजनेत किती पैसे मिळतात?","crops":[],
-   "must_include":[["6000","६०००","6,000","₹6"]],"dose":"any"},
-  {"id":"safety-spray","category":"योजना / सुरक्षा","q":"औषध फवारताना काय काळजी घ्यावी?","crops":[],
-   "must_include":[["मास्क","mask","हातमोजे","gloves","हात मोजे"]],"dose":"any"}
+ {
+  "id": "kb-onion-blotch",
+  "category": "KB पीक (कांदा)",
+  "q": "कांद्याच्या पानावर जांभळे डाग पडलेत, काय फवारू?",
+  "crops": [
+   "onion"
+  ],
+  "must_include": [
+   [
+    "iprodione",
+    "rovral",
+    "रोव्रल",
+    "आयप्रोडिओन"
+   ],
+   [
+    "mancozeb",
+    "dithane",
+    "मॅन्कोझेब",
+    "डायथेन"
+   ]
+  ],
+  "dose": "allowed"
+ },
+ {
+  "id": "kb-onion-thrips",
+  "category": "KB पीक (कांदा)",
+  "q": "कांद्यावर थ्रिप्स म्हणजे फुलकिडे आलेत, उपाय सांगा",
+  "crops": [
+   "onion"
+  ],
+  "must_include": [
+   [
+    "fipronil",
+    "regent",
+    "रिजेंट",
+    "फिप्रोनिल"
+   ]
+  ],
+  "dose": "allowed"
+ },
+ {
+  "id": "kb-tomato-late-blight",
+  "category": "KB पीक (टोमॅटो)",
+  "q": "टोमॅटोला उशिरा करपा आलाय, पाने काळी पडतायत",
+  "crops": [
+   "tomato"
+  ],
+  "must_include": [
+   [
+    "ridomil",
+    "metalaxyl",
+    "रिडोमिल",
+    "मेटॅलॅक्सिल"
+   ]
+  ],
+  "dose": "allowed"
+ },
+ {
+  "id": "kb-tomato-borer",
+  "category": "KB पीक (टोमॅटो)",
+  "q": "टोमॅटोच्या फळाला छिद्र पडून आत अळी दिसतेय",
+  "crops": [
+   "tomato"
+  ],
+  "must_include": [
+   [
+    "emamectin",
+    "proclaim",
+    "इमामेक्टिन"
+   ]
+  ],
+  "dose": "allowed"
+ },
+ {
+  "id": "kb-tomato-whitefly",
+  "category": "KB पीक (टोमॅटो)",
+  "q": "टोमॅटोवर पांढरी माशी खूप झालीय",
+  "crops": [
+   "tomato"
+  ],
+  "must_include": [
+   [
+    "imidacloprid",
+    "confidor",
+    "इमिडाक्लोप्रिड",
+    "कॉन्फिडोर"
+   ]
+  ],
+  "dose": "allowed"
+ },
+ {
+  "id": "kb-soy-girdle",
+  "category": "KB पीक (सोयाबीन)",
+  "q": "सोयाबीनच्या खोडावर गोल चक्र दिसतंय, चक्रीभुंगा आहे का?",
+  "crops": [
+   "soybean"
+  ],
+  "must_include": [
+   [
+    "thiamethoxam",
+    "थायामेथॉक्सम",
+    "थायोमेथॉक्झाम"
+   ]
+  ],
+  "dose": "allowed"
+ },
+ {
+  "id": "kb-soy-rust",
+  "category": "KB पीक (सोयाबीन)",
+  "q": "सोयाबीनवर गंज रोग आलाय काय करू",
+  "crops": [
+   "soybean"
+  ],
+  "must_include": [
+   [
+    "hexaconazole",
+    "हेक्साकोनाझोल"
+   ]
+  ],
+  "dose": "allowed"
+ },
+ {
+  "id": "kb-grape-downy",
+  "category": "KB पीक (इतर)",
+  "q": "द्राक्षाच्या पानावर पांढरट डाग आणि खाली भुरी दिसतेय, डाऊनी आहे का?",
+  "crops": [
+   "grape"
+  ],
+  "dose": "any"
+ },
+ {
+  "id": "kb-pomegranate-telya",
+  "category": "KB पीक (इतर)",
+  "q": "डाळिंबावर तेल्या रोगाचे काळे डाग आलेत",
+  "crops": [
+   "pomegranate"
+  ],
+  "dose": "any"
+ },
+ {
+  "id": "kb-cotton-bollworm",
+  "category": "KB पीक (इतर)",
+  "q": "कापसावर बोंडअळी आलीय, काय करायचं?",
+  "crops": [
+   "cotton"
+  ],
+  "dose": "any"
+ },
+ {
+  "id": "kb-chilli-thrips",
+  "category": "KB पीक (इतर)",
+  "q": "मिरचीची पाने वाकडी होऊन खाली वळतायत",
+  "crops": [
+   "chilli"
+  ],
+  "dose": "any"
+ },
+ {
+  "id": "nokb-mango-powdery",
+  "category": "KB बाहेरचं पीक — dose नको",
+  "q": "आंब्याला मोहोरावर भुरी रोग आलाय, काय फवारू?",
+  "crops": [
+   "mango"
+  ],
+  "must_not_include": [
+   "कांदा",
+   "टोमॅटो",
+   "सोयाबीन"
+  ],
+  "dose": "forbidden"
+ },
+ {
+  "id": "nokb-turmeric-leaf",
+  "category": "KB बाहेरचं पीक — dose नको",
+  "q": "हळदीची पाने करपली आहेत, औषध किती घ्यायचं?",
+  "crops": [
+   "turmeric"
+  ],
+  "dose": "forbidden"
+ },
+ {
+  "id": "nokb-jowar-fallarmy",
+  "category": "KB बाहेरचं पीक — dose नको",
+  "q": "ज्वारीवर लष्करी अळी आलीय, पंपाला किती औषध टाकू?",
+  "crops": [
+   "jowar"
+  ],
+  "dose": "forbidden"
+ },
+ {
+  "id": "nokb-banana-sigatoka",
+  "category": "KB बाहेरचं पीक — dose नको",
+  "q": "केळीच्या पानांवर पिवळे पट्टे आणि करपा दिसतोय",
+  "crops": [
+   "banana"
+  ],
+  "dose": "forbidden"
+ },
+ {
+  "id": "nokb-groundnut-tikka",
+  "category": "KB बाहेरचं पीक — dose नको",
+  "q": "भुईमुगाच्या पानांवर तपकिरी गोल डाग आलेत",
+  "crops": [
+   "groundnut"
+  ],
+  "dose": "forbidden"
+ },
+ {
+  "id": "nokb-maize-fallarmy",
+  "category": "KB बाहेरचं पीक — dose नको",
+  "q": "मक्याच्या पोंग्यात अळी दिसतेय, कोणतं औषध किती?",
+  "crops": [
+   "maize"
+  ],
+  "dose": "forbidden"
+ },
+ {
+  "id": "nokb-ginger-rot",
+  "category": "KB बाहेरचं पीक — dose नको",
+  "q": "आल्याचे कंद कुजतायत आणि पाने पिवळी पडतायत",
+  "crops": [
+   "ginger"
+  ],
+  "must_not_include": [
+   "कांद्याला",
+   "कांद्याचे"
+  ],
+  "dose": "forbidden"
+ },
+ {
+  "id": "ambig-yellow-leaves",
+  "category": "पीक माहीत नाही — आधी प्रश्न विचार",
+  "q": "पाने पिवळी पडली आहेत काय करू?",
+  "crops": [],
+  "clarify": true,
+  "dose": "forbidden"
+ },
+ {
+  "id": "ambig-which-spray",
+  "category": "पीक माहीत नाही — आधी प्रश्न विचार",
+  "q": "फवारणी कोणती करू?",
+  "crops": [],
+  "clarify": true,
+  "dose": "forbidden"
+ },
+ {
+  "id": "ambig-medicine",
+  "category": "पीक माहीत नाही — आधी प्रश्न विचार",
+  "q": "औषध सांगा",
+  "crops": [],
+  "clarify": true,
+  "dose": "forbidden"
+ },
+ {
+  "id": "follow-onion-nochange",
+  "category": "मागच्या संभाषणाचा संदर्भ",
+  "q": "ते फवारून झालं पण फरक पडला नाही, आता पुढे काय?",
+  "crops": [
+   "onion"
+  ],
+  "history": [
+   {
+    "user_message": "कांद्याच्या पानावर जांभळे डाग पडलेत",
+    "bot_response": "हा करपा रोग आहे. Iprodione + Mancozeb सकाळी फवारा, 10 दिवसांनी पुन्हा."
+   }
+  ],
+  "must_not_include": [
+   "टोमॅटो"
+  ],
+  "dose": "any"
+ },
+ {
+  "id": "roman-onion-blotch",
+  "category": "रोमन मराठी / हिंदी / इंग्रजी",
+  "q": "kandyala kai fawaraycha purple dag ale ahet",
+  "crops": [
+   "onion"
+  ],
+  "must_include": [
+   [
+    "iprodione",
+    "rovral",
+    "रोव्रल",
+    "mancozeb",
+    "dithane",
+    "मॅन्कोझेब"
+   ]
+  ],
+  "dose": "allowed"
+ },
+ {
+  "id": "roman-tomato-whitefly",
+  "category": "रोमन मराठी / हिंदी / इंग्रजी",
+  "q": "tomato la pandhri mashi ali ahe kay karu",
+  "crops": [
+   "tomato"
+  ],
+  "must_include": [
+   [
+    "imidacloprid",
+    "confidor",
+    "इमिडाक्लोप्रिड",
+    "कॉन्फिडोर"
+   ]
+  ],
+  "dose": "allowed"
+ },
+ {
+  "id": "english-tomato-whitefly",
+  "category": "रोमन मराठी / हिंदी / इंग्रजी",
+  "q": "How to control whitefly in tomato?",
+  "crops": [
+   "tomato"
+  ],
+  "must_include": [
+   [
+    "imidacloprid",
+    "confidor",
+    "इमिडाक्लोप्रिड",
+    "कॉन्फिडोर"
+   ]
+  ],
+  "dose": "allowed"
+ },
+ {
+  "id": "hindi-tomato-whitefly",
+  "category": "रोमन मराठी / हिंदी / इंग्रजी",
+  "q": "tamatar me safed makhi ka ilaj batao",
+  "crops": [
+   "tomato"
+  ],
+  "dose": "allowed"
+ },
+ {
+  "id": "gen-onion-fert",
+  "category": "खत / पेरणी / पाणी",
+  "q": "कांद्याला खत किती आणि कधी द्यायचं?",
+  "crops": [
+   "onion"
+  ],
+  "dose": "any"
+ },
+ {
+  "id": "gen-soy-sowing",
+  "category": "खत / पेरणी / पाणी",
+  "q": "सोयाबीनची पेरणी कधी करायची?",
+  "crops": [
+   "soybean"
+  ],
+  "must_include": [
+   [
+    "जून",
+    "जुलै",
+    "june",
+    "july"
+   ]
+  ],
+  "dose": "any"
+ },
+ {
+  "id": "gen-sugarcane-water",
+  "category": "खत / पेरणी / पाणी",
+  "q": "ऊसाला पाणी किती आणि किती दिवसांनी द्यायचं?",
+  "crops": [
+   "sugarcane"
+  ],
+  "dose": "any"
+ },
+ {
+  "id": "scheme-pm-kisan",
+  "category": "योजना / सुरक्षा",
+  "q": "पीएम किसान योजनेत किती पैसे मिळतात?",
+  "crops": [],
+  "must_include": [
+   [
+    "6000",
+    "६०००",
+    "6,000",
+    "₹6"
+   ]
+  ],
+  "dose": "any"
+ },
+ {
+  "id": "safety-spray",
+  "category": "योजना / सुरक्षा",
+  "q": "औषध फवारताना काय काळजी घ्यावी?",
+  "crops": [],
+  "must_include": [
+   [
+    "मास्क",
+    "mask",
+    "हातमोजे",
+    "gloves",
+    "हात मोजे"
+   ]
+  ],
+  "dose": "any"
+ },
+ {
+  "id": "var-onion-spelling",
+  "category": "मराठी रूपं / spelling",
+  "q": "कांदयाच्या पानावर जांभळे डाग पडलेत",
+  "crops": [],
+  "must_include": [
+   [
+    "iprodione",
+    "rovral",
+    "रोव्रल",
+    "mancozeb",
+    "dithane",
+    "मॅन्कोझेब"
+   ]
+  ],
+  "dose": "allowed"
+ },
+ {
+  "id": "var-tomato-stem",
+  "category": "मराठी रूपं / spelling",
+  "q": "टमाट्याला फळात अळी पडतेय",
+  "crops": [],
+  "must_include": [
+   [
+    "emamectin",
+    "proclaim",
+    "इमामेक्टिन"
+   ]
+  ],
+  "dose": "allowed"
+ },
+ {
+  "id": "var-soy-short-i",
+  "category": "मराठी रूपं / spelling",
+  "q": "सोयाबिनवर चक्रीभुंगा आलाय",
+  "crops": [],
+  "must_include": [
+   [
+    "thiamethoxam",
+    "थायामेथॉक्सम",
+    "थायोमेथॉक्झाम"
+   ]
+  ],
+  "dose": "allowed"
+ },
+ {
+  "id": "var-cotton-kapashi",
+  "category": "मराठी रूपं / spelling",
+  "q": "कपाशीची पाने लाल पडतायत काय करू",
+  "crops": [],
+  "dose": "any"
+ },
+ {
+  "id": "var-pyaj-hindi",
+  "category": "मराठी रूपं / spelling",
+  "q": "प्याजला पानावर डाग पडलेत काय करू",
+  "crops": [],
+  "must_include": [
+   [
+    "iprodione",
+    "rovral",
+    "रोव्रल",
+    "mancozeb",
+    "dithane",
+    "मॅन्कोझेब"
+   ]
+  ],
+  "dose": "allowed"
+ },
+ {
+  "id": "var-mango-compound",
+  "category": "मराठी रूपं / spelling",
+  "q": "आंब्याचा मोहोर काळा पडतोय",
+  "crops": [],
+  "dose": "forbidden",
+  "must_not_include": [
+   "कांदा",
+   "टोमॅटो"
+  ]
+ },
+ {
+  "id": "var-farmer-wrong-crop",
+  "category": "मराठी रूपं / spelling",
+  "q": "टोमॅटोच्या पानावर काळे डाग आलेत",
+  "crops": [
+   "onion"
+  ],
+  "must_include": [
+   [
+    "ridomil",
+    "metalaxyl",
+    "रिडोमिल",
+    "मेटॅलॅक्सिल"
+   ]
+  ],
+  "must_not_include": [
+   "कांद्या"
+  ],
+  "dose": "allowed"
+ },
+ {
+  "id": "var-no-crop-first-msg",
+  "category": "मराठी रूपं / spelling",
+  "q": "पाने पिवळी पडून गळतायत",
+  "crops": [],
+  "clarify": true,
+  "dose": "forbidden"
+ }
 ]
