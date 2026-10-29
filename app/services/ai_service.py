@@ -21,7 +21,13 @@ GROQ_URL       = "https://api.groq.com/openai/v1/chat/completions"
 GEMINI_URL     = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 GROQ_MODEL     = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 # टीप: Model नावं Render env मध्ये ठेवली — Google/Groq model बंद केलं तरी code बदलावा लागत नाही.
-GEMINI_MODEL   = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+# टीप (ऑक्टोबर 2026): Google ने free tier चं quota आता *प्रत्येक model साठी वेगळं* केलंय. Flash-Lite models
+# (3.1 / 3.5) ला साधारण 500 requests/दिवस, पण मोठ्या Flash models ला फक्त ~20/दिवस. जुना 2.5 Flash-Lite
+# default वापरला तर free मर्यादा खूपच कमी असू शकते (आणि तो बंद होण्याच्या मार्गावर). म्हणून नवा default.
+# दुसरा Flash-Lite model (GEMINI_MODEL_2) दिला तर त्याचं quota वेगळं मिळतं — मर्यादा दुप्पट.
+# तुमच्या खात्याची खरी मर्यादा: aistudio.google.com/rate-limit
+GEMINI_MODEL   = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
+GEMINI_MODEL_2 = os.getenv("GEMINI_MODEL_2", "").strip()
 GROQ_VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
 # फोटो-निदानासाठी वेगळा (मोठा) Gemini model वापरता येतो; नाही दिला तर GEMINI_MODEL च.
 GEMINI_VISION_MODEL = os.getenv("GEMINI_VISION_MODEL", GEMINI_MODEL)
@@ -33,7 +39,7 @@ GEMINI_VISION_MODEL = os.getenv("GEMINI_VISION_MODEL", GEMINI_MODEL)
 # मर्यादा तुमच्या खात्याची AI Studio → Rate limits पानावर बघा आणि खाली env मध्ये थोडी कमी ठेवा.
 _PT = ZoneInfo("America/Los_Angeles")
 _IST = ZoneInfo("Asia/Kolkata")
-GEMINI_DAILY_BUDGET = int(os.getenv("GEMINI_DAILY_BUDGET", "800"))   # 0 = मर्यादा नाही
+GEMINI_DAILY_BUDGET = int(os.getenv("GEMINI_DAILY_BUDGET", "450"))   # प्रत्येक model साठी; 0 = मर्यादा नाही
 GEMINI_RPM_LIMIT    = int(os.getenv("GEMINI_RPM_LIMIT", "12"))
 GROQ_DAILY_BUDGET   = int(os.getenv("GROQ_DAILY_BUDGET", "0"))
 TAVILY_DAILY_LIMIT  = int(os.getenv("TAVILY_DAILY_LIMIT", "25"))      # 1000 credits/महिना ≈ 33/दिवस
@@ -80,7 +86,42 @@ class _Quota:
         return {"day": self.day, "used": self.count, "budget": self.daily or "no-limit",
                 "cooldown_s": max(0, int(self.cool_until - time.time()))}
 
-_gemini_q = _Quota("gemini", GEMINI_DAILY_BUDGET, GEMINI_RPM_LIMIT, _PT)
+# मोठ्या (non-lite) models चं free quota फार कमी असतं (~20/दिवस) — त्यांचं बजेट वेगळं सांगता येतं:
+#   GEMINI_MODEL_BUDGETS="gemini-3.8-flash:18"   (model:दैनिक-बजेट, स्वल्पविराम)
+_MODEL_BUDGETS = {}
+for _pair in os.getenv("GEMINI_MODEL_BUDGETS", "").split(","):
+    if ":" in _pair:
+        _m, _b = _pair.rsplit(":", 1)
+        try:
+            _MODEL_BUDGETS[_m.strip()] = int(_b)
+        except ValueError:
+            pass
+
+_gemini_quotas = {}
+
+def _gq(model: str) -> "_Quota":
+    """प्रत्येक Gemini model साठी स्वतंत्र quota-मोजणी (Google प्रत्येक model चं quota वेगळं मोजतो)."""
+    if model not in _gemini_quotas:
+        _gemini_quotas[model] = _Quota(f"gemini:{model}", _MODEL_BUDGETS.get(model, GEMINI_DAILY_BUDGET),
+                                       GEMINI_RPM_LIMIT, _PT)
+    return _gemini_quotas[model]
+
+def _gemini_models() -> list:
+    return [m for m in (GEMINI_MODEL, GEMINI_MODEL_2) if m]
+
+def _gemini_any_available() -> bool:
+    return any(_gq(m).available() for m in _gemini_models())
+
+def _gemini_fraction() -> float:
+    """सर्व text models मिळून किती टक्के quota वापरलंय (० ते १)."""
+    ms = _gemini_models()
+    tot = sum(_gq(m).daily for m in ms if _gq(m).daily)
+    used = sum(_gq(m).count for m in ms if _gq(m).daily)
+    for m in ms:
+        _gq(m)._roll()
+    return (used / tot) if tot else 0.0
+
+_gemini_q = _gq(GEMINI_MODEL)   # (जुन्या references साठी — मुख्य model)
 _groq_q   = _Quota("groq", GROQ_DAILY_BUDGET, 0, _PT)
 _tavily_q = _Quota("tavily", TAVILY_DAILY_LIMIT, 0, _IST)
 
@@ -626,7 +667,7 @@ async def llm_understand(question: str) -> dict:
     hit = _understand_cache.get(ckey)
     if hit and time.time() - hit[0] < 86400:
         return hit[1]                        # तोच प्रश्न परत आला — AI call नको
-    if GEMINI_API_KEY and (not _gemini_q.available() or _gemini_q.fraction() > 0.7):
+    if GEMINI_API_KEY and (not _gemini_any_available() or _gemini_fraction() > 0.7):
         # Gemini चं quota ७०% संपलंय — उरलेलं खरी उत्तरं देण्यासाठी राखून ठेव; आता फक्त शब्द-यादी वापर.
         return {}
     try:
@@ -821,31 +862,32 @@ def _clean_llm_output(text: str) -> str:
     return text.strip()
 
 async def _gemini_call(messages: list, max_tokens: int = 600) -> str:
-    """Google Gemini — OpenAI-compatible endpoint वापरून, त्यामुळे Cerebras/Groq सारखाच
-    call pattern. Free tier: 15 RPM, 250,000 TPM (Groq पेक्षा 31 पट जास्त), 1000 RPD.
-    Card लागत नाही — aistudio.google.com वर मोफत key मिळते."""
     if not GEMINI_API_KEY: return ""
-    if not _gemini_q.available():          # मर्यादेजवळ/cooldown — फुकट request वाया घालवू नको, थेट Groq कडे
-        log.info(f"Gemini quota guard → skip | {_gemini_q.status()}")
-        return ""
-    _gemini_q.note()
-    try:
-        async with httpx.AsyncClient(timeout=30) as c:
-            r = await c.post(
-                GEMINI_URL,
-                headers={"Authorization": f"Bearer {GEMINI_API_KEY}", "Content-Type": "application/json"},
-                json={"model": GEMINI_MODEL, "messages": messages, "max_tokens": max_tokens,
-                      "temperature": 0.4}
-            )
+    # मुख्य model → दुसरा model (असेल तर). एखादा model quota/cooldown/404 मुळे अडला तर पुढचा.
+    for model in _gemini_models():
+        q = _gq(model)
+        if not q.available():
+            log.info(f"Gemini quota guard → skip {model} | {q.status()}")
+            continue
+        q.note()
+        try:
+            async with httpx.AsyncClient(timeout=30) as c:
+                r = await c.post(
+                    GEMINI_URL,
+                    headers={"Authorization": f"Bearer {GEMINI_API_KEY}", "Content-Type": "application/json"},
+                    json={"model": model, "messages": messages, "max_tokens": max_tokens,
+                          "temperature": 0.4}
+                )
             if r.status_code == 200:
                 return _clean_llm_output(r.json()["choices"][0]["message"]["content"])
             if r.status_code == 429:
-                _gemini_q.cooldown(_retry_after(r))
-            log.error(f"Gemini: {r.status_code} {r.text[:150]}")
-            return ""
-    except Exception as e:
-        log.error(f"Gemini failed: {e}")
-        return ""
+                q.cooldown(_retry_after(r))
+            elif r.status_code == 404:
+                q.cooldown(3600)      # model बंद/नाव चुकलं — तासभर वापरू नको, दुसऱ्याकडे जा
+            log.error(f"Gemini[{model}]: {r.status_code} {r.text[:150]}")
+        except Exception as e:
+            log.error(f"Gemini[{model}] exc: {e}")
+    return ""
 
 async def _groq_call(messages: list, max_tokens: int = 600) -> str:
     if not GROQ_API_KEY: return ""
@@ -1068,7 +1110,7 @@ async def farming_answer(question: str, farmer: dict, history: list = None, hint
             log.warning("Gemini failed → Groq fallback")
             ans = await _groq_call(messages, 300)
         if not ans:
-            if not _gemini_q.available() and not _groq_q.available():
+            if not _gemini_any_available() and not _groq_q.available():
                 return BUSY_MSG
             return "❌ थोडी अडचण आली. पुन्हा विचारा. 🙏"
 
@@ -1163,8 +1205,9 @@ async def disease_detect(image_bytes: bytes, caption: str, farmer: dict) -> str:
         # quota Groq च्या chat quota पेक्षा वेगळा आहे, त्यामुळे दोन्ही मिळून जास्त भक्कम uptime.
         # Groq (qwen vision model) फक्त fallback म्हणून राहतो.
         d = ""
-        if GEMINI_API_KEY and _gemini_q.available():
-            _gemini_q.note()
+        _vq = _gq(GEMINI_VISION_MODEL)
+        if GEMINI_API_KEY and _vq.available():
+            _vq.note()
             try:
                 async with httpx.AsyncClient(timeout=30) as c:
                     r = await c.post(
@@ -1176,7 +1219,9 @@ async def disease_detect(image_bytes: bytes, caption: str, farmer: dict) -> str:
                         d = _clean_llm_output(r.json()["choices"][0]["message"]["content"])
                     else:
                         if r.status_code == 429:
-                            _gemini_q.cooldown(_retry_after(r))
+                            _vq.cooldown(_retry_after(r))
+                        elif r.status_code == 404:
+                            _vq.cooldown(3600)
                         log.warning(f"Gemini vision failed [{r.status_code}] → Groq fallback")
             except Exception as e:
                 log.warning(f"Gemini vision failed → Groq fallback: {e}")
