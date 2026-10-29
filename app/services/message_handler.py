@@ -3,7 +3,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from app.services.database import (get_farmer, create_farmer, log_conv, get_last_messages,
     update_farmer_crops, update_farmer_state, update_farmer_district, update_farmer_taluka, set_opt_out)
-from app.services.ai_service import farming_answer, disease_detect, voice_to_text, CROP_KEYWORDS, DISEASE_WORDS, FERTILIZER_WORDS, any_kw
+from app.services.ai_service import farming_answer, disease_detect, voice_to_text, CROP_KEYWORDS, DISEASE_WORDS, FERTILIZER_WORDS, any_kw, llm_understand, _detect_crops
 from app.services.weather import get_weather
 from app.services.mandi import get_mandi_prices
 from app.services.whatsapp import get_media_url, download_media, was_nudged_recently, clear_nudge
@@ -18,15 +18,43 @@ FREE_NUMBERS = []
 # फक्त संपूर्ण message हाच शब्द असेल तरच — "पंप बंद पडला" सारख्या प्रश्नाने चुकून बंद होऊ नये.
 STOP_WORDS = {"stop", "बंद", "बंद करा", "थांबवा", "थांबा", "unsubscribe", "band", "band kara"}
 START_WORDS = {"चालू", "चालू करा", "सुरू", "सुरू करा", "subscribe", "resume", "chalu", "chalu kara"}
+THANKS_WORDS = {"धन्यवाद", "आभारी आहे", "आभार", "thanks", "thank you", "thankyou", "ठीक आहे", "छान", "बरं", "बर", "ok thanks"}
 YES_WORDS = {"हो", "होय", "हा", "ho", "hoy", "ha", "yes", "ok", "ओके"}
 PRIVACY_URL = os.getenv("PRIVACY_URL", "")
+
+# AI ने संदेश आधी समजून घ्यायचा का?
+#   "always"   = प्रत्येक प्रश्नावर AI आधी विषय (हवामान/भाव/रोग/खत) आणि पीक समजून घेतो; शब्द-यादी फक्त मदतीला.
+#                मराठीतल्या कोणत्याही रूपासाठी सर्वात चांगलं. (प्रत्येक संदेशाला एक छोटा extra AI call)
+#   "fallback" = शब्द जुळले नाहीत तरच AI ला विचारतो (स्वस्त/जलद, पण शब्द जुळले आणि चुकीचे असतील तर AI मदत करत नाही)
+UNDERSTAND_MODE = os.getenv("UNDERSTAND_MODE", "fallback").strip().lower()   # free tier साठी "fallback" (कमी calls)
 
 CONSENT_LINE = ("🔒 आम्ही तुमचा नंबर, पिकं आणि प्रश्न सेवा देण्यासाठी आणि सुधारण्यासाठी साठवतो. "
                 "रोजचे संदेश थांबवायला कधीही *बंद* लिहा."
                 + (f"\nगोपनीयता: {PRIVACY_URL}" if PRIVACY_URL else ""))
 
 # ── दिवसाची message मर्यादा (खर्च/दुरुपयोग नियंत्रण) ────────────────────────────
-DAILY_MSG_LIMIT = max(5, int(os.getenv("DAILY_MSG_LIMIT", "60")))
+DAILY_MSG_LIMIT = max(5, int(os.getenv("DAILY_MSG_LIMIT", "150")))   # सर्व संदेश (दुरुपयोग रोखायला)
+
+# AI वापरणाऱ्या प्रश्नांची मर्यादा (free-tier quota वाचवायला): हवामान/भाव/तारीख यात मोजली जात नाहीत.
+# फोटो = 2, व्हॉइस = 1, AI-उत्तर = 1.
+DAILY_AI_LIMIT = max(3, int(os.getenv("DAILY_AI_LIMIT", "20")))
+_ai_used = {}   # phone -> (IST तारीख, count)
+AI_LIMIT_MSG = ("🙏 आजचे तुमचे प्रश्न (AI उत्तरं) संपले आहेत, उद्या पुन्हा विचारा.\n"
+                "🌦️ हवामान आणि 📊 मंडई भाव कधीही विचारू शकता.\n"
+                "तातडीच्या मदतीसाठी 📞 1800-180-1551 (मोफत)")
+
+def _ai_today():
+    return datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+
+def _ai_over(phone: str) -> bool:
+    d, n = _ai_used.get(phone, (_ai_today(), 0))
+    return d == _ai_today() and n >= DAILY_AI_LIMIT
+
+def _ai_use(phone: str, weight: int = 1):
+    d, n = _ai_used.get(phone, (_ai_today(), 0))
+    if d != _ai_today():
+        n = 0
+    _ai_used[phone] = (_ai_today(), n + weight)
 _daily = {}   # phone -> (IST तारीख, count)
 
 def _rate_check(phone: str) -> str:
@@ -285,8 +313,12 @@ async def _route(phone, msg, mtype, farmer):
         elif mtype == "image":
             img_id = msg.get("image", {}).get("id", "")
             caption = msg.get("image", {}).get("caption", "")
-            resp = await _image(img_id, caption, farmer)
-            if resp and not resp.startswith("❌"):
+            if _ai_over(phone):
+                resp = AI_LIMIT_MSG
+            else:
+                _ai_use(phone, 2)
+                resp = await _image(img_id, caption, farmer)
+            if resp and resp != AI_LIMIT_MSG and not resp.startswith("❌"):
                 _mark_feedback(phone, always=True)
             await log_conv(phone, f"[IMAGE]{caption}", resp, "image")
             return resp
@@ -299,6 +331,9 @@ async def _route(phone, msg, mtype, farmer):
         log.error(f"Route {phone}: {e}")
         return "❌ *थोडी अडचण आली.*\nकृपया पुन्हा प्रयत्न करा. 🙏"
 
+WEATHER_WORDS += ["वातावरण", "तापमान", "ढगाळ", "गारपीट", "वादळ", "वारा", "आर्द्रता", "पावस", "पावसा", "उष्ण", "उन्ह", "ऊन्ह", "vatavaran", "tapman", "pavsa", "pavus"]
+MANDI_WORDS += ["रेट", "मंडी", "आवक", "बाजारात", "विकलं", "विकतोय", "bajar", "bajarbhav", "mandit"]
+
 def _scan_new_crops(text: str, existing_crops: list) -> list:
     """Message madhe konte pik mention zalay te shodh, jya already farmer.crops madhe nahit"""
     t = text.lower()
@@ -307,7 +342,7 @@ def _scan_new_crops(text: str, existing_crops: list) -> list:
     for crop, keywords in CROP_KEYWORDS.items():
         if crop in existing_lower:
             continue
-        if any_kw(keywords, t):
+        if any_kw(keywords, t, crop_mode=True):
             new_found.append(crop)
     return new_found
 
@@ -333,7 +368,29 @@ async def _text(phone: str, text: str, farmer: dict) -> str:
     # "थंडीमुळे पान सुकतंय" सारखा प्रश्न disease-सल्ला हवा असतो, नुसता hवामान अंदाज नाही.
     _early_disease_fert_check = any_kw(DISEASE_WORDS, t) or any_kw(FERTILIZER_WORDS, t)
 
-    if any_kw(WEATHER_WORDS, t) and not _early_disease_fert_check:
+    if t in THANKS_WORDS:
+        return "🙏 धन्यवाद! आणखी काही विचारायचं असेल तर कधीही विचारा 🌾"
+
+    # टीप: हवामान/भाव/रोग/खत/पीक — यापैकी कुठलाच शब्द जुळला नाही तर (मराठी रूपं, चुकीचे spelling) शेवटचा
+    # आधार म्हणून LLM ला विचार: हा संदेश कशाबद्दल आहे आणि कोणतं पीक. (शब्द जुळले असतील तर LLM call होत नाही.)
+    _is_weather = any_kw(WEATHER_WORDS, t)
+    _is_mandi = any_kw(MANDI_WORDS, t)
+    _q_crops = _detect_crops(t, [])
+    _symptom = _early_disease_fert_check        # रोग/कीड/खत प्रश्न — हवामान/भाव shortcut ने hijack करू नये
+    hint = None
+    _kw_hit = _is_weather or _is_mandi or _early_disease_fert_check or bool(_q_crops)
+    if len(t) >= 5 and (UNDERSTAND_MODE == "always" or not _kw_hit) and not _ai_over(phone):
+        hint = await llm_understand(text)
+        _intent = (hint or {}).get("intent")
+        if _intent == "thanks":
+            return "🙏 धन्यवाद! आणखी काही विचारायचं असेल तर कधीही विचारा 🌾"
+        # शब्द-यादी आणि AI दोघांचे निष्कर्ष एकत्र (union) — एकाने चूक केली तर दुसरा सांभाळतो
+        _is_weather = _is_weather or (_intent == "weather")
+        _is_mandi = _is_mandi or (_intent == "mandi")
+        _symptom = _symptom or (_intent in ("disease", "fertilizer"))
+        _q_crops = list(dict.fromkeys(list(_q_crops) + list((hint or {}).get("crops", []) or [])))
+
+    if _is_weather and not _symptom:
         return await get_weather(
             farmer.get("lat", 18.5204),
             farmer.get("lon", 73.8567),
@@ -343,12 +400,14 @@ async def _text(phone: str, text: str, farmer: dict) -> str:
     # टीप: DISEASE_WORDS/FERTILIZER_WORDS असतील तर हे मंडई-भाव पेक्षा जास्त तातडीचं आहे —
     # farmer ला रोग/खताचा प्रश्न असेल तर price shortcut ने तो hijack करायचा नाही, नाहीतर
     # "कांद्याला रोग आलाय" सारखा तातडीचा प्रश्न चुकून फक्त भाव दाखवून थांबायचा.
-    if any_kw(MANDI_WORDS, t) and not _early_disease_fert_check:
+    if _is_mandi and not _symptom:
         district = farmer.get("district", "Pune")
         # टीप: आधी farmer चे स्वतःचे crops कधीच पाठवले जात नव्हते — नेहमी mandi.py चा
         # default (onion/tomato) दाखवला जायचा, farmer प्रत्यक्षात काहीही पिकवत असला तरी.
         # आता farmer.crops (जर नोंदलेले असतील तर) थेट पाठवतो.
-        farmer_crops = farmer.get("crops", [])
+        # टीप: शेतकऱ्याने प्रश्नात ज्या पिकाचा भाव विचारला तेच आधी ("टोमॅटोचा भाव" → टोमॅटो), नाहीतर नोंदलेली पिकं.
+        # (आधी नेहमी नोंदलेल्या पिकांचेच भाव यायचे, प्रश्नात काहीही असलं तरी.)
+        farmer_crops = _q_crops or farmer.get("crops", [])
         if farmer_crops:
             return await get_mandi_prices(district, crops=farmer_crops)
         return await get_mandi_prices(district)
@@ -361,13 +420,19 @@ async def _text(phone: str, text: str, farmer: dict) -> str:
         await update_farmer_crops(phone, updated_crops)
         farmer["crops"] = updated_crops  # current request sathi pan update kar
 
+    if _ai_over(phone):
+        return AI_LIMIT_MSG
+    _ai_use(phone)
     history = await get_last_messages(phone, limit=6)
-    ans = await farming_answer(text, farmer, history)
+    ans = await farming_answer(text, farmer, history, hint=hint)
     if ans and not ans.startswith("❌"):
         _mark_feedback(phone)
     return ans
 
 async def _audio(phone: str, msg: dict, farmer: dict) -> str:
+    if _ai_over(phone):
+        return AI_LIMIT_MSG
+    _ai_use(phone)
     try:
         audio_data = msg.get("audio") or msg.get("voice") or {}
         audio_id = audio_data.get("id", "")
