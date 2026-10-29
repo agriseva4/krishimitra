@@ -1,4 +1,4 @@
-import logging, os, httpx
+import asyncio, logging, os, httpx
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from app.config import META_ACCESS_TOKEN, META_PHONE_NUMBER_ID
@@ -6,7 +6,16 @@ from app.config import META_ACCESS_TOKEN, META_PHONE_NUMBER_ID
 log = logging.getLogger(__name__)
 TO = httpx.Timeout(15.0, connect=5.0)
 
-def _url(): return f"https://graph.facebook.com/v19.0/{META_PHONE_NUMBER_ID}/messages"
+# टीप: Meta जुन्या API versions कालांतराने बंद करतो. version Render env मध्ये ठेवली — Meta App Dashboard मध्ये
+# तुमच्या app ला दाखवलेली version इथे द्या (WA_GRAPH_VERSION=vXX.0); code बदलावा लागत नाही.
+GRAPH_VER = os.getenv("WA_GRAPH_VERSION", "v19.0")
+
+def mask_phone(p: str) -> str:
+    """logs मध्ये पूर्ण फोन नंबर नको (गोपनीयता): 919876543210 → 91******3210"""
+    p = str(p or "")
+    return (p[:2] + "*" * max(0, len(p) - 6) + p[-4:]) if len(p) > 6 else "***"
+
+def _url(): return f"https://graph.facebook.com/{GRAPH_VER}/{META_PHONE_NUMBER_ID}/messages"
 def _hdr(): return {"Authorization": f"Bearer {META_ACCESS_TOKEN}", "Content-Type": "application/json"}
 
 REENGAGE_CODE = 131047   # Meta: "Re-engagement message" — farmer ने गेल्या 24 तासांत message केला नाही
@@ -19,31 +28,45 @@ def _today():
     return datetime.now(_IST).date().isoformat()
 
 async def send_message_ex(to: str, text: str):
-    """(ok, error_code) परत करतो — error_code Meta चा (उदा. 131047) किंवा None."""
+    """(ok, error_code) परत करतो — error_code Meta चा (उदा. 131047) किंवा None.
+    तात्पुरत्या अडचणीत (Meta 429/5xx, connect error) एकदा पुन्हा प्रयत्न करतो. ReadTimeout वर नाही —
+    कारण तेव्हा संदेश कदाचित गेलेला असतो आणि पुन्हा पाठवल्यास शेतकऱ्याला दोनदा दिसेल."""
     if not META_ACCESS_TOKEN or not META_PHONE_NUMBER_ID:
         log.warning("META keys missing")
         return False, None
     if len(text) > 4090: text = text[:4087] + "..."
-    try:
-        async with httpx.AsyncClient(timeout=TO) as c:
-            r = await c.post(_url(), json={
-                "messaging_product": "whatsapp",
-                "recipient_type": "individual",
-                "to": to, "type": "text",
-                "text": {"body": text, "preview_url": False}
-            }, headers=_hdr())
-            if r.status_code != 200:
-                code = None
-                try:
-                    code = (r.json().get("error") or {}).get("code")
-                except Exception:
-                    pass
-                log.error(f"WA [{r.status_code}] code={code}: {r.text[:100]}")
-                return False, code
-            return True, None
-    except Exception as e:
-        log.error(f"send_message: {e}")
-        return False, None
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to, "type": "text",
+        "text": {"body": text, "preview_url": False}
+    }
+    for attempt in (1, 2):
+        try:
+            async with httpx.AsyncClient(timeout=TO) as c:
+                r = await c.post(_url(), json=payload, headers=_hdr())
+            if r.status_code == 200:
+                return True, None
+            code = None
+            try:
+                code = (r.json().get("error") or {}).get("code")
+            except Exception:
+                pass
+            if attempt == 1 and (r.status_code == 429 or r.status_code >= 500):
+                await asyncio.sleep(1.5)
+                continue
+            log.error(f"WA [{r.status_code}] code={code}: {r.text[:100]}")
+            return False, code
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            if attempt == 1:
+                await asyncio.sleep(1.5)
+                continue
+            log.error(f"send_message connect: {e}")
+            return False, None
+        except Exception as e:
+            log.error(f"send_message: {e}")
+            return False, None
+    return False, None
 
 async def send_message(to: str, text: str) -> bool:
     ok, _code = await send_message_ex(to, text)
@@ -99,7 +122,7 @@ async def get_media_url(media_id: str) -> str:
     if not media_id: return ""
     try:
         async with httpx.AsyncClient(timeout=TO) as c:
-            r = await c.get(f"https://graph.facebook.com/v19.0/{media_id}", headers=_hdr())
+            r = await c.get(f"https://graph.facebook.com/{GRAPH_VER}/{media_id}", headers=_hdr())
             if r.status_code == 200: return r.json().get("url", "")
     except Exception as e:
         log.error(f"get_media_url: {e}")
@@ -124,7 +147,7 @@ async def upload_media(file_bytes: bytes, mime_type: str = "audio/mpeg") -> str:
             files = {"file": ("voice_reply.mp3", file_bytes, mime_type)}
             data = {"messaging_product": "whatsapp", "type": mime_type}
             r = await c.post(
-                f"https://graph.facebook.com/v19.0/{META_PHONE_NUMBER_ID}/media",
+                f"https://graph.facebook.com/{GRAPH_VER}/{META_PHONE_NUMBER_ID}/media",
                 headers={"Authorization": f"Bearer {META_ACCESS_TOKEN}"},
                 files=files, data=data
             )
