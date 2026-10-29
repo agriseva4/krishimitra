@@ -3,7 +3,7 @@ from fastapi import APIRouter, Request, BackgroundTasks
 from fastapi.responses import PlainTextResponse
 from app.config import META_VERIFY_TOKEN, META_APP_SECRET
 from app.services.message_handler import handle
-from app.services.whatsapp import send_message
+from app.services.whatsapp import send_message, mask_phone
 from app.services.database import try_claim_message
 
 log = logging.getLogger(__name__)
@@ -109,7 +109,7 @@ async def _process(phone, msg, mtype):
                     from app.services.feedback import ask_feedback
                     await ask_feedback(phone)
             except Exception as e:
-                log.warning(f"Feedback ask skipped {phone}: {e}")
+                log.warning(f"Feedback ask skipped {mask_phone(phone)}: {e}")
             # Farmer ने VOICE ने विचारलं होतं तर उत्तर सुद्धा voice madhe pathaव —
             # tyala vachaता yet nasel tar hे khूप उपयोगी. Best-effort — TTS fail zala
             # tarी text answer aधीच gela aahe, so farmer कधीच रिकाम्या हाताने राहत नाही.
@@ -121,9 +121,9 @@ async def _process(phone, msg, mtype):
                     if audio_bytes:
                         await send_audio_message(phone, audio_bytes)
                 except Exception as e:
-                    log.warning(f"Voice reply skipped {phone}: {e}")
+                    log.warning(f"Voice reply skipped {mask_phone(phone)}: {e}")
     except Exception as e:
-        log.error(f"Process {phone}: {e}")
+        log.error(f"Process {mask_phone(phone)}: {e}")
         try:
             await send_message(phone, "❌ *थोडी अडचण आली.*\nकृपया पुन्हा प्रयत्न करा. 🙏")
         except:
