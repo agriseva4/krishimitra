@@ -1,9 +1,17 @@
-import logging
+import logging, os
+from datetime import datetime, timedelta
 from typing import Optional
+from zoneinfo import ZoneInfo
 from app.config import SUPABASE_URL, SUPABASE_KEY
+from app.services.whatsapp import mask_phone
 
 log = logging.getLogger(__name__)
 _db = None
+_IST = ZoneInfo("Asia/Kolkata")
+
+def _today_ist():
+    """Render server UTC वर चालतो — तारखा भारतीय (IST) दिवसानुसार मोजा."""
+    return datetime.now(_IST).date()
 
 def get_db():
     global _db
@@ -43,7 +51,7 @@ async def create_farmer(phone: str):
             "crops": [], "language": "mr",
             "location_set": False
         }).execute()
-        log.info(f"New farmer: {phone}")
+        log.info(f"New farmer: {mask_phone(phone)}")
     except Exception as e:
         log.error(f"create_farmer: {e}")
 
@@ -53,7 +61,7 @@ async def update_farmer_state(phone: str, state: str):
         db = get_db()
         if not db: return
         db.table("farmers").update({"state": state}).eq("phone", phone).execute()
-        log.info(f"State updated: {phone} → {state}")
+        log.info(f"State updated: {mask_phone(phone)} → {state}")
     except Exception as e:
         log.error(f"update_farmer_state: {e}")
 
@@ -68,7 +76,7 @@ async def update_farmer_district(phone: str, district_key: str, district_name: s
             "district": district_name, "city": district_name,
             "lat": lat, "lon": lon,
         }).eq("phone", phone).execute()
-        log.info(f"District updated: {phone} → {district_name}")
+        log.info(f"District updated: {mask_phone(phone)} → {district_name}")
     except Exception as e:
         log.error(f"update_farmer_district: {e}")
 
@@ -81,7 +89,7 @@ async def update_farmer_taluka(phone: str, taluka: str):
             "taluka": taluka,
             "location_set": True
         }).eq("phone", phone).execute()
-        log.info(f"Taluka updated: {phone} → {taluka}")
+        log.info(f"Taluka updated: {mask_phone(phone)} → {taluka}")
     except Exception as e:
         log.error(f"update_farmer_taluka: {e}")
 
@@ -98,7 +106,7 @@ async def update_farmer_location(phone: str, district: str, info: dict):
             "lon": info["lon"],
             "location_set": True
         }).eq("phone", phone).execute()
-        log.info(f"Location updated: {phone} → {district}")
+        log.info(f"Location updated: {mask_phone(phone)} → {district}")
     except Exception as e:
         log.error(f"update_farmer_location: {e}")
 
@@ -112,7 +120,7 @@ async def update_farmer_crops(phone: str, crops: list):
         db.table("farmers").update({
             "crops": unique_crops
         }).eq("phone", phone).execute()
-        log.info(f"Crops updated: {phone} → {unique_crops}")
+        log.info(f"Crops updated: {mask_phone(phone)} → {unique_crops}")
     except Exception as e:
         log.error(f"update_farmer_crops: {e}")
 
@@ -176,10 +184,9 @@ async def store_mandi(records: list):
 
 async def get_mandi_history(commodity: str, district: str, days: int = 7) -> list:
     try:
-        from datetime import date, timedelta
         db = get_db()
         if not db: return []
-        since = (date.today() - timedelta(days=days)).isoformat()
+        since = (_today_ist() - timedelta(days=days)).isoformat()
         r = db.table("mandi_prices")\
             .select("*")\
             .eq("commodity", commodity)\
@@ -198,10 +205,9 @@ async def try_claim_broadcast(broadcast_type: str) -> bool:
     duplicate messages जायचे. इथे Supabase च्या PRIMARY KEY (broadcast_type, date) मुळे
     फक्त एकच process insert यशस्वी करू शकते — तीच पुढे जाऊन प्रत्यक्ष पाठवते, दुसरी आपोआप थांबते."""
     try:
-        from datetime import date
         db = get_db()
         if not db: return True  # DB unavailable असेल तर जुनी पद्धत (पाठव, risk स्वीकार)
-        today = date.today().isoformat()
+        today = _today_ist().isoformat()
         db.table("broadcast_log").insert({
             "broadcast_type": broadcast_type,
             "broadcast_date": today
@@ -242,3 +248,31 @@ async def set_opt_out(phone: str, flag: bool) -> bool:
     except Exception as e:
         log.error(f"set_opt_out: {e}")
         return False
+
+
+CONVERSATION_RETENTION_DAYS = int(os.getenv("CONVERSATION_RETENTION_DAYS", "180"))
+
+async def cleanup_old_data() -> dict:
+    """रोज रात्री जुना data काढतो — नाहीतर Supabase free (500 MB) हळूहळू भरतो आणि बंद पडतो.
+    काय राहतं: farmers, feedback (कायम). काय जातं: processed_messages >3 दिवस, broadcast_log >30 दिवस,
+    mandi_prices >60 दिवस, conversations > CONVERSATION_RETENTION_DAYS (default 180 — गोपनीयतेसाठीही चांगलं)."""
+    out = {}
+    db = get_db()
+    if not db:
+        return out
+    now = datetime.now(_IST)
+    jobs = [
+        ("processed_messages", "processed_at", (now - timedelta(days=3)).isoformat()),
+        ("broadcast_log", "broadcast_date", (now.date() - timedelta(days=30)).isoformat()),
+        ("mandi_prices", "price_date", (now.date() - timedelta(days=60)).isoformat()),
+        ("conversations", "created_at", (now - timedelta(days=CONVERSATION_RETENTION_DAYS)).isoformat()),
+    ]
+    for table, col, cutoff in jobs:
+        try:
+            r = db.table(table).delete().lt(col, cutoff).execute()
+            out[table] = len(r.data or [])
+        except Exception as e:
+            log.warning(f"cleanup {table}: {e}")
+            out[table] = "error"
+    log.info(f"🧹 cleanup: {out}")
+    return out
