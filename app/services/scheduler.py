@@ -23,8 +23,17 @@ def start_scheduler():
     # सेवा न वापरता. (टीप: process पूर्णपणे झोपला/बंद पडला तर हा self-ping सुद्धा थांबतो —
     # त्यामुळे पहिल्यांदा जागं करण्यासाठी अजूनही एखादी बाह्य ping सेवा असणं जास्त सुरक्षित आहे.)
     _s.add_job(self_ping, IntervalTrigger(minutes=10), id="self_ping", replace_existing=True)
+    _s.add_job(cleanup, CronTrigger(hour=3, minute=30, timezone=IST), id="cleanup", replace_existing=True)
     _s.start()
     log.info("✅ Scheduler started (IST): 7AM weather | 8:30AM mandi | 6PM tip | Hourly alert check | Self-ping every 10min")
+
+async def cleanup():
+    """रोज 3:30 IST — जुना data साफ (डेटाबेस भरू नये म्हणून)."""
+    try:
+        from app.services.database import cleanup_old_data
+        await cleanup_old_data()
+    except Exception as e:
+        log.error(f"cleanup job: {e}")
 
 async def self_ping():
     """Render free-tier service ला 15-मिनिटांच्या inactivity-sleep पासून वाचवण्यासाठी
@@ -270,7 +279,7 @@ async def evening():
                 # टीप: आधी सगळ्या farmers ना एकच tip जायचा — तो नेहमी कांदा/टोमॅटो बद्दलच
                 # असायचा, farmer च्या स्वतःच्या पिकाशी काहीही संबंध नसताना. आता farmer.crops
                 # बघून त्याच्याशी जुळणारा tip दिला जातो — नसेल जुळत तर crop-तटस्थ generic tip.
-                tip = _tip(datetime.now().month, f.get("crops", []))
+                tip = _tip(datetime.now(IST).month, f.get("crops", []))
                 await send_broadcast(f["phone"], tip)
                 await asyncio.sleep(0.5)
             except Exception as e:
