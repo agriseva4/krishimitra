@@ -6,7 +6,7 @@ from app.services.database import (get_farmer, create_farmer, log_conv, get_last
 from app.services.ai_service import farming_answer, disease_detect, voice_to_text, CROP_KEYWORDS, DISEASE_WORDS, FERTILIZER_WORDS, any_kw, llm_understand, _detect_crops
 from app.services.weather import get_weather
 from app.services.mandi import get_mandi_prices
-from app.services.whatsapp import get_media_url, download_media, was_nudged_recently, clear_nudge
+from app.services.whatsapp import get_media_url, download_media, was_nudged_recently, clear_nudge, mask_phone
 from app.services.digest import build_daily_digest
 from app.data.maharashtra_locations import MAHARASHTRA_DISTRICTS, DIVISIONS, get_talukas
 
@@ -328,7 +328,7 @@ async def _route(phone, msg, mtype, farmer):
             return resp
         return WELCOME
     except Exception as e:
-        log.error(f"Route {phone}: {e}")
+        log.error(f"Route {mask_phone(phone)}: {e}")
         return "❌ *थोडी अडचण आली.*\nकृपया पुन्हा प्रयत्न करा. 🙏"
 
 WEATHER_WORDS += ["वातावरण", "तापमान", "ढगाळ", "गारपीट", "वादळ", "वारा", "आर्द्रता", "पावस", "पावसा", "उष्ण", "उन्ह", "ऊन्ह", "vatavaran", "tapman", "pavsa", "pavus"]
