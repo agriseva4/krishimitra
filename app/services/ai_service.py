@@ -1,7 +1,13 @@
+import collections
+import json
 import logging
 import os
 import random
 import re
+import time
+import unicodedata
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import httpx
 from app.config import GROQ_API_KEY, TAVILY_API_KEY, GEMINI_API_KEY
 
@@ -20,21 +26,110 @@ GROQ_VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
 # फोटो-निदानासाठी वेगळा (मोठा) Gemini model वापरता येतो; नाही दिला तर GEMINI_MODEL च.
 GEMINI_VISION_MODEL = os.getenv("GEMINI_VISION_MODEL", GEMINI_MODEL)
 
+# ── Free-tier quota संरक्षण ────────────────────────────────────────────────
+# Free tier मध्ये बंधन "प्रति दिवस requests (RPD)" आणि "प्रति मिनिट (RPM)" चं असतं. ते संपलं की सेवा बंद पडते.
+# म्हणून प्रत्येक provider चा वापर मोजतो: मर्यादेजवळ गेलो की आधीच Groq कडे वळतो आणि AI-ने-समजून-घेणं थांबवतो
+# (शब्द-यादी चालूच राहते). Google चं दैनिक quota मध्यरात्री Pacific वेळेला resetहोतं, म्हणून दिवस Pacific ने मोजतो.
+# मर्यादा तुमच्या खात्याची AI Studio → Rate limits पानावर बघा आणि खाली env मध्ये थोडी कमी ठेवा.
+_PT = ZoneInfo("America/Los_Angeles")
+_IST = ZoneInfo("Asia/Kolkata")
+GEMINI_DAILY_BUDGET = int(os.getenv("GEMINI_DAILY_BUDGET", "800"))   # 0 = मर्यादा नाही
+GEMINI_RPM_LIMIT    = int(os.getenv("GEMINI_RPM_LIMIT", "12"))
+GROQ_DAILY_BUDGET   = int(os.getenv("GROQ_DAILY_BUDGET", "0"))
+TAVILY_DAILY_LIMIT  = int(os.getenv("TAVILY_DAILY_LIMIT", "25"))      # 1000 credits/महिना ≈ 33/दिवस
+
+class _Quota:
+    def __init__(self, name, daily=0, rpm=0, tz=_PT):
+        self.name, self.daily, self.rpm, self.tz = name, daily, rpm, tz
+        self.day, self.count, self.cool_until = "", 0, 0.0
+        self.stamps = collections.deque()
+
+    def _roll(self):
+        d = datetime.now(self.tz).date().isoformat()
+        if d != self.day:
+            self.day, self.count = d, 0
+
+    def available(self) -> bool:
+        self._roll()
+        now = time.time()
+        if now < self.cool_until:
+            return False
+        if self.daily and self.count >= self.daily:
+            return False
+        if self.rpm:
+            while self.stamps and now - self.stamps[0] > 60:
+                self.stamps.popleft()
+            if len(self.stamps) >= self.rpm:
+                return False
+        return True
+
+    def note(self):
+        self._roll()
+        self.count += 1
+        self.stamps.append(time.time())
+
+    def cooldown(self, secs: float = 60):
+        self.cool_until = time.time() + secs
+
+    def fraction(self) -> float:
+        self._roll()
+        return (self.count / self.daily) if self.daily else 0.0
+
+    def status(self) -> dict:
+        self._roll()
+        return {"day": self.day, "used": self.count, "budget": self.daily or "no-limit",
+                "cooldown_s": max(0, int(self.cool_until - time.time()))}
+
+_gemini_q = _Quota("gemini", GEMINI_DAILY_BUDGET, GEMINI_RPM_LIMIT, _PT)
+_groq_q   = _Quota("groq", GROQ_DAILY_BUDGET, 0, _PT)
+_tavily_q = _Quota("tavily", TAVILY_DAILY_LIMIT, 0, _IST)
+
+def _retry_after(r, default: float = 60) -> float:
+    try:
+        return min(300.0, float(r.headers.get("retry-after", default)))
+    except Exception:
+        return default
+
+BUSY_MSG = ("🙏 आज सेवेवर खूप ताण आहे, थोड्या वेळाने पुन्हा विचारा.\n"
+            "🌦️ हवामान आणि 📊 मंडई भाव आत्ताही विचारू शकता.\n"
+            "तातडीच्या मदतीसाठी 📞 1800-180-1551 (मोफत)")
+
 # ── Keyword matching (शब्द-सीमा सह) ─────────────────────────────────────────
 # आधी `kw in text` (substring) वापरायचो — त्यामुळे "paus" मध्ये "us" (ऊस), "until" मध्ये "til" (तीळ)
 # सापडायचं आणि चुकीचं पीक farmer.crops मध्ये save व्हायचं. आता इंग्रजी-अक्षरी लहान शब्दांसाठी
 # डावीकडची शब्द-सीमा तपासतो (उजवीकडे मराठी प्रत्यय — "rogacha", "kandyala" — चालू देतो).
 _LATIN_KW = re.compile(r"^[a-z ]+$")
 
-def kw_in(text: str, kw: str) -> bool:
-    kw = kw.lower()
-    if not _LATIN_KW.match(kw) or len(kw) > 4:
-        return kw in text
-    pat = r"(?<![a-z])" + re.escape(kw) + (r"(?![a-z])" if len(kw) <= 2 else "")
-    return re.search(pat, text) is not None
+# मराठी वर्तनी-भेद सारखे करतो: सोयाबीन/सोयाबिन, डाळिंब/डाळींब, हरभऱ्या/हरभर्या.
+# टीप: फक्त सुरक्षित भेदच सारखे केलेत. ळ→ल आणि ू→ु मुद्दाम नाही — नाहीतर "येतील" मध्ये "तीळ"
+# आणि "तुरंत" मध्ये "तूर" पकडला जाऊन शेतकऱ्याच्या नोंदीत चुकीचं पीक साठायचं (test: eval/test_keywords.py).
+_NORM_TABLE = str.maketrans({"ी": "ि", "ँ": "ं", "ऱ": "र", "\u200d": "", "\u200c": "", "़": ""})
 
-def any_kw(words, text: str) -> bool:
-    return any(kw_in(text, w) for w in words)
+def norm(s: str) -> str:
+    return unicodedata.normalize("NFC", (s or "").lower()).translate(_NORM_TABLE)
+
+_INDEP_VOWEL = re.compile(r"^[\u0904-\u0914]")
+
+def _kw_in_norm(nt: str, nk: str, crop_mode: bool = False) -> bool:
+    """crop_mode (पीकाची नावं ओळखताना) जास्त काटेकोर: उदा. "ऊस" हा "पाऊस" च्या आत सापडू नये
+    (स्वर-अक्षराने सुरू होणारा शब्द फक्त शब्दाच्या सुरुवातीलाच), आणि ३-अक्षरी इंग्रजी शब्द
+    ("til", "mug", "fig") पूर्ण शब्द म्हणून हवेत — "until", "figure" मध्ये नकोत."""
+    if not _LATIN_KW.match(nk):
+        if crop_mode and _INDEP_VOWEL.match(nk):
+            return re.search(r"(?<![\u0900-\u097F])" + re.escape(nk), nt) is not None
+        return nk in nt
+    if len(nk) > 4:
+        return nk in nt
+    strict_right = len(nk) <= (3 if crop_mode else 2)
+    pat = r"(?<![a-z])" + re.escape(nk) + (r"(?![a-z])" if strict_right else "")
+    return re.search(pat, nt) is not None
+
+def kw_in(text: str, kw: str, crop_mode: bool = False) -> bool:
+    return _kw_in_norm(norm(text), norm(kw), crop_mode)
+
+def any_kw(words, text: str, crop_mode: bool = False) -> bool:
+    nt = norm(text)
+    return any(_kw_in_norm(nt, norm(w), crop_mode) for w in words)
 
 # ── औषधाचं प्रमाण (dose) सुरक्षा-कवच ─────────────────────────────────────────
 # टीप: पडताळलेली KB (पीक-विशिष्ट रोग माहिती) नसेल तेव्हा — म्हणजे आंबा, हळद, ज्वारी यांसारख्या पिकांसाठी,
@@ -486,12 +581,97 @@ OTHER_CROPS = {
 # CROP_KEYWORDS = combined — message_handler.py cha crop-save logic sathi vaparla jato
 CROP_KEYWORDS = {**KB_CROPS, **OTHER_CROPS}
 
+# मराठी रूपं/spelling जी आधी सुटत होती (टीप: norm() मुळे ी/ि, ू/ु सारखे भेद आपोआप जुळतात)
+_EXTRA_CROP_KW = {
+    "onion":    ["कांदय", "कांदे", "kandyala", "kande", "पांढरा कांदा", "लाल कांदा"],
+    "tomato":   ["टमाट", "टोमॅट", "tamata", "tamatar", "टमाटर"],
+    "cotton":   ["कपाशी", "kapashi", "कापसा", "कापुस", "bt cotton"],
+    "soybean":  ["soyabean", "soyabin", "सोयाबिन", "सोयाबीन"],
+    "pomegranate": ["डाळींब", "डाळिंब", "dalimba", "anaar"],
+    "grape":    ["द्राक्ष", "drakshe", "द्राक्षे", "द्राक्षा"],
+    "sugarcane": ["ऊस", "उस", "ऊसा", "उसा", "usala", "kadus"],
+    "wheat":    ["गहू", "गव्हा", "gahu", "gavhala"],
+    "maize":    ["मका", "मक्या", "makka", "makyala"],
+    "chilli":   ["मिरची", "मिरच्या", "mirchila", "mirchi"],
+    "brinjal":  ["वांगी", "वांग्या", "vangi", "vangyala"],
+    "potato":   ["बटाटा", "बटाट्या", "batatyala"],
+    "tur":      ["तूर", "तुरी", "turila"],
+    "harbara":  ["हरभरा", "हरभऱ्या", "harbhara", "harbhyala"],
+    "gram":     ["हरभरा", "हरभऱ्या", "chana", "चणा"],
+}
+# टीप: "तुर"/"tur" हे छोटे शब्द "तुरंत", "तुरुंग", "turant" मध्ये सापडत होते — तूर साठी फक्त सुरक्षित रूपं ठेव.
+CROP_KEYWORDS["tur"] = [k for k in CROP_KEYWORDS["tur"] if k not in ("tur", "तुर")] + ["turi", "turicha", "toor"]
+for _k, _v in _EXTRA_CROP_KW.items():
+    if _k in CROP_KEYWORDS:
+        CROP_KEYWORDS[_k] = list(CROP_KEYWORDS[_k]) + [x for x in _v if x not in CROP_KEYWORDS[_k]]
+
+# रोग/कीड/खत शब्द — मराठीत शेतकरी जसं बोलतात तसे (आधी: सडतंय, गुंडाळतात, करपलं, युरिया सुटत होते)
+DISEASE_WORDS += ["सडत", "सडल", "सडून", "कुज", "गुंडाळ", "वळत", "वळल", "करपल", "करप", "कोमेज", "वाळत", "वाळल",
+                  "मावा", "तुडतुडे", "फुलकिडे", "थ्रिप्स", "पांढरी माशी", "लष्करी", "बोंडअळी", "तांबेरा", "भुरी",
+                  "चिकटा", "जळत", "जळल", "कीड", "लाल्या", "मर रोग", "wilt", "thrips", "mava"]
+FERTILIZER_WORDS += ["युरिया", "डीएपी", "पोटॅश", "झिंक", "गंधक", "सल्फर", "खतं", "खताचा", "खताची", "फॉस्फेट",
+                     "सेंद्रिय", "शेणखत", "drip", "ड्रिप", "अन्नद्रव्य", "वाढ खुंटल"]
+
+# LLM कडून "समजून घेणं" — keyword न जुळल्यास (मराठी रूपं/चुकीचे spelling) शेवटचा आधार
+_understand_cache: dict = {}
+_INTENTS = {"weather", "mandi", "disease", "fertilizer", "irrigation", "scheme", "sowing", "thanks", "other"}
+
+async def llm_understand(question: str) -> dict:
+    """शेतकऱ्याचा संदेश समजून {"intent":..., "crops":[...]} देतो. keyword जुळले नाहीत तेव्हाच बोलावतो.
+    crops फक्त आपल्या यादीतलेच परत येतात (बाकी टाकून देतो), त्यामुळे मॉडेलने काहीही सांगितलं तरी सुरक्षित.
+    काहीही बिघडलं तर {} — म्हणजे bot आधीसारखंच चालतं."""
+    if not GEMINI_API_KEY and not GROQ_API_KEY:
+        return {}
+    ckey = norm(question)[:200]
+    hit = _understand_cache.get(ckey)
+    if hit and time.time() - hit[0] < 86400:
+        return hit[1]                        # तोच प्रश्न परत आला — AI call नको
+    if GEMINI_API_KEY and (not _gemini_q.available() or _gemini_q.fraction() > 0.7):
+        # Gemini चं quota ७०% संपलंय — उरलेलं खरी उत्तरं देण्यासाठी राखून ठेव; आता फक्त शब्द-यादी वापर.
+        return {}
+    try:
+        keys = ", ".join(CROP_KEYWORDS.keys())
+        system = (
+            "You label WhatsApp messages from Indian farmers (mostly Marathi, sometimes Marathi in English letters). "
+            'Reply with ONLY one line of JSON: {"intent":"<weather|mandi|disease|fertilizer|irrigation|scheme|sowing|thanks|other>",'
+            '"crops":["<crop key>"]}. '
+            f"crops must be chosen ONLY from this list: [{keys}]. Use [] if the message names no crop from the list. "
+            "Understand Marathi grammar and spelling variants (कांद्याला, कांद्यावर = onion; टमाट्याला = tomato; "
+            "कपाशी = cotton; सोयाबिन = soybean; डाळींब = pomegranate; ऊस/उस = sugarcane). "
+            "weather = rain/temperature/forecast; mandi = market price/rate; disease = pest, disease or symptoms on the plant; "
+            "fertilizer = manure/nutrients/slow growth; irrigation = water; scheme = government scheme/subsidy/loan; "
+            "sowing = when/how to sow; thanks = thanks/ok/bye; other = anything else."
+        )
+        msgs = [{"role": "system", "content": system}, {"role": "user", "content": (question or "")[:400]}]
+        raw = await (_gemini_call(msgs, max_tokens=80) if GEMINI_API_KEY else _groq_call(msgs, max_tokens=80))
+        m = re.search(r"\{.*\}", raw or "", re.S)
+        if not m:
+            return {}
+        d = json.loads(m.group(0))
+        intent = d.get("intent") if d.get("intent") in _INTENTS else "other"
+        crops = [c for c in (d.get("crops") or []) if c in CROP_KEYWORDS]
+        log.info(f"LLM_UNDERSTAND | intent={intent} | crops={crops}")
+        res = {"intent": intent, "crops": crops}
+        _understand_cache[ckey] = (time.time(), res)
+        if len(_understand_cache) > 2000:
+            for k in sorted(_understand_cache, key=lambda x: _understand_cache[x][0])[:500]:
+                _understand_cache.pop(k, None)
+        return res
+    except Exception as e:
+        log.warning(f"llm_understand: {e}")
+        return {}
+
+def _augment_with_crops(question: str, crop_keys: list) -> str:
+    """LLM ने ओळखलेलं पीक संदर्भ (KB) शोधण्यासाठी प्रश्नात जोडतो — मूळ प्रश्न model ला जसाच्या तसा जातो."""
+    extra = " ".join(CROP_KEYWORDS[c][0] for c in crop_keys if c in CROP_KEYWORDS)
+    return f"{question} {extra}".strip() if extra else question
+
 def _detect_crops(text: str, farmer_crops: list) -> list:
     """Question madhe specific crop mention kela ka — nahi tar farmer.crops vapar"""
     t = text.lower()
     found = []
     for crop, keywords in CROP_KEYWORDS.items():
-        if any_kw(keywords, t):
+        if any_kw(keywords, t, crop_mode=True):
             found.append(crop)
     if found:
         return found
@@ -645,6 +825,10 @@ async def _gemini_call(messages: list, max_tokens: int = 600) -> str:
     call pattern. Free tier: 15 RPM, 250,000 TPM (Groq पेक्षा 31 पट जास्त), 1000 RPD.
     Card लागत नाही — aistudio.google.com वर मोफत key मिळते."""
     if not GEMINI_API_KEY: return ""
+    if not _gemini_q.available():          # मर्यादेजवळ/cooldown — फुकट request वाया घालवू नको, थेट Groq कडे
+        log.info(f"Gemini quota guard → skip | {_gemini_q.status()}")
+        return ""
+    _gemini_q.note()
     try:
         async with httpx.AsyncClient(timeout=30) as c:
             r = await c.post(
@@ -655,6 +839,8 @@ async def _gemini_call(messages: list, max_tokens: int = 600) -> str:
             )
             if r.status_code == 200:
                 return _clean_llm_output(r.json()["choices"][0]["message"]["content"])
+            if r.status_code == 429:
+                _gemini_q.cooldown(_retry_after(r))
             log.error(f"Gemini: {r.status_code} {r.text[:150]}")
             return ""
     except Exception as e:
@@ -663,6 +849,10 @@ async def _gemini_call(messages: list, max_tokens: int = 600) -> str:
 
 async def _groq_call(messages: list, max_tokens: int = 600) -> str:
     if not GROQ_API_KEY: return ""
+    if not _groq_q.available():
+        log.info(f"Groq quota guard → skip | {_groq_q.status()}")
+        return ""
+    _groq_q.note()
     try:
         async with httpx.AsyncClient(timeout=30) as c:
             r = await c.post(
@@ -673,6 +863,8 @@ async def _groq_call(messages: list, max_tokens: int = 600) -> str:
             )
             if r.status_code == 200:
                 return _clean_llm_output(r.json()["choices"][0]["message"]["content"])
+            if r.status_code == 429:
+                _groq_q.cooldown(_retry_after(r))
             log.error(f"Groq: {r.status_code}")
             return ""
     except Exception as e:
@@ -704,6 +896,10 @@ async def _tavily_search(query: str) -> str:
     if cached and (time.time() - cached[0]) < _TAVILY_CACHE_TTL:
         log.info(f"Tavily cache hit: {cache_key[:50]}")
         return cached[1]
+    if not _tavily_q.available():           # दिवसाची मर्यादा (free: 1000 credits/महिना) — संपली तर search नको
+        log.info("Tavily daily cap reached → skip")
+        return ""
+    _tavily_q.note()
     try:
         from tavily import TavilyClient
         client = TavilyClient(api_key=TAVILY_API_KEY)
@@ -756,7 +952,7 @@ def _build_tavily_query(question: str, farmer_crops: list) -> str:
         return f"{crops_str} {question}"
     return question
 
-async def farming_answer(question: str, farmer: dict, history: list = None) -> str:
+async def farming_answer(question: str, farmer: dict, history: list = None, hint: dict = None) -> str:
     if not GEMINI_API_KEY and not GROQ_API_KEY:
         return "❌ सेवा सध्या उपलब्ध नाही. थोड्या वेळाने विचारा. 🙏"
     try:
@@ -764,7 +960,14 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
         crops = ", ".join(farmer_crops) or "सांगितले नाही"
         city = farmer.get("city", "Pune")
         district = farmer.get("district", "Pune")
-        context, specific_found, unmapped_crops = _get_context(question, farmer, history)
+        # टीप: message मध्ये ओळखता येईल असं पीक नाही आणि history मधूनही नाही — तर keyword यादीत नसलेलं
+        # रूप/spelling असू शकतं (उदा. "कपाशीला", "टमाट्याला"). तेव्हा एकदा LLM ला विचार. नाहीतर आधी
+        # असा प्रश्न "कोणत्या पिकाबद्दल?" विचारायचा किंवा शेतकऱ्याचं नोंदलेलं (चुकीचं) पीक गृहीत धरायचा.
+        if hint is None and not _detect_crops(question, []) and not _infer_crop_from_history(history or []):
+            hint = await llm_understand(question)
+        hint_crops = [c for c in ((hint or {}).get("crops") or []) if c in CROP_KEYWORDS]
+        aug_q = _augment_with_crops(question, hint_crops)
+        context, specific_found, unmapped_crops = _get_context(aug_q, farmer, history)
 
         # टीप: तीन केसेस वेगळ्या ओळखतो — पुढे Tavily आणि prompt दोन्हीसाठी वापरायला:
         # 1) is_ambiguous — कुठलंच पीक ओळखलं गेलं नाही (ना message, ना history) → Tavily
@@ -776,7 +979,7 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
         # Follow-up question आहे का — म्हणजे current message madhe crop mention nasla,
         # pan history madhun tो olakhla gela. Asel tar model la explicit sanga, nahitar
         # tо parat "kontya pikala?" vicharat rahil (jari history var vishayacha context asel tari).
-        current_msg_crops = _detect_crops(question, [])
+        current_msg_crops = _detect_crops(aug_q, [])
         inferred_crop_note = ""
         if not current_msg_crops and history:
             inferred = _infer_crop_from_history(history)
@@ -865,6 +1068,8 @@ async def farming_answer(question: str, farmer: dict, history: list = None) -> s
             log.warning("Gemini failed → Groq fallback")
             ans = await _groq_call(messages, 300)
         if not ans:
+            if not _gemini_q.available() and not _groq_q.available():
+                return BUSY_MSG
             return "❌ थोडी अडचण आली. पुन्हा विचारा. 🙏"
 
         if not dose_ok:
@@ -883,7 +1088,7 @@ def _identify_photo_crop(caption: str, farmer_crops: list) -> list:
     text = (caption or "").lower()
     found = []
     for crop, keywords in CROP_KEYWORDS.items():
-        if any_kw(keywords, text):
+        if any_kw(keywords, text, crop_mode=True):
             found.append(crop)
     if found:
         return found
@@ -958,7 +1163,8 @@ async def disease_detect(image_bytes: bytes, caption: str, farmer: dict) -> str:
         # quota Groq च्या chat quota पेक्षा वेगळा आहे, त्यामुळे दोन्ही मिळून जास्त भक्कम uptime.
         # Groq (qwen vision model) फक्त fallback म्हणून राहतो.
         d = ""
-        if GEMINI_API_KEY:
+        if GEMINI_API_KEY and _gemini_q.available():
+            _gemini_q.note()
             try:
                 async with httpx.AsyncClient(timeout=30) as c:
                     r = await c.post(
@@ -969,6 +1175,8 @@ async def disease_detect(image_bytes: bytes, caption: str, farmer: dict) -> str:
                     if r.status_code == 200:
                         d = _clean_llm_output(r.json()["choices"][0]["message"]["content"])
                     else:
+                        if r.status_code == 429:
+                            _gemini_q.cooldown(_retry_after(r))
                         log.warning(f"Gemini vision failed [{r.status_code}] → Groq fallback")
             except Exception as e:
                 log.warning(f"Gemini vision failed → Groq fallback: {e}")
