@@ -110,6 +110,8 @@ async def feedback(rating: str = "down", limit: int = 50,
 async def usage(s: Optional[str] = Header(None, alias="X-Admin-Secret")):
     """आजचा AI/Search वापर — free-tier मर्यादेपासून किती दूर आहात ते बघायला."""
     _auth(s)
-    from app.services.ai_service import _gemini_q, _groq_q, _tavily_q
-    return {"gemini": _gemini_q.status(), "groq": _groq_q.status(), "tavily": _tavily_q.status(),
+    from app.services.ai_service import _gemini_quotas, _gemini_models, _gq, GEMINI_VISION_MODEL, _groq_q, _tavily_q
+    for m in set(_gemini_models() + [GEMINI_VISION_MODEL]):
+        _gq(m)
+    return {"gemini": {m: q.status() for m, q in _gemini_quotas.items()}, "groq": _groq_q.status(), "tavily": _tavily_q.status(),
             "note": "Gemini दिवस = Pacific वेळ (मध्यरात्री reset); Tavily दिवस = IST. हा आकडा server restart वर शून्य होतो."}
